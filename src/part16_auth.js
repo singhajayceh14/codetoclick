@@ -69,57 +69,81 @@
 
     var form = el('<form class="si-form" novalidate></form>');
 
-    var err = el('<div class="si-err" role="alert" hidden>' +
-      '<svg class="ico" viewBox="0 0 24 24"><use href="#i-info"></use></svg><span></span></div>');
+    var err = el('<div class="si-err" role="alert" aria-live="assertive" hidden>' +
+      '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-info"></use></svg>' +
+      '<span><span class="t"></span><span class="h" hidden></span></span></div>');
     form.appendChild(err);
 
-    var emailWrap = el('<div></div>');
-    emailWrap.appendChild(el('<label class="si-lab" for="si-email">Email</label>'));
-    var email = el('<input class="si-in" id="si-email" type="email" name="email" autocomplete="username" ' +
-      'placeholder="you@codetoclick.ai" required>');
-    emailWrap.appendChild(email);
-    form.appendChild(emailWrap);
+    /* Input first, label second: the label and the reveal button are styled as
+       following siblings of the input, which is what lets the label lift on
+       :focus and on :not(:placeholder-shown). The placeholder is a single
+       space on purpose - a real one would defeat that selector. */
+    function field(id, type, label, ac, cls) {
+      var f = el('<div class="si-field' + (cls ? ' ' + cls : '') + '"></div>');
+      var input = el('<input class="si-in" id="' + id + '" type="' + type + '" ' +
+        'name="' + id.replace('si-', '') + '" autocomplete="' + ac + '" placeholder=" " required>');
+      f.appendChild(input);
+      f.appendChild(el('<label class="si-lab" for="' + id + '">' + esc(label) + '</label>'));
+      f.input = input;
+      return f;
+    }
 
-    var pwWrap = el('<div></div>');
-    pwWrap.appendChild(el('<label class="si-lab" for="si-pw">Password</label>'));
-    var pwBox = el('<div class="si-pw"></div>');
-    var pw = el('<input class="si-in" id="si-pw" type="password" name="password" ' +
-      'autocomplete="current-password" placeholder="••••••••••" required>');
-    var peek = el('<button type="button" class="si-peek" aria-label="Show password">Show</button>');
+    var emailField = field('si-email', 'email', 'Email address', 'username');
+    var email = emailField.input;
+    form.appendChild(emailField);
+
+    var pwField = field('si-pw', 'password', 'Password', 'current-password', 'pw');
+    var pw = pwField.input;
+    var peek = el('<button type="button" class="si-peek" aria-pressed="false" aria-label="Show password">' +
+      '<svg class="ico i-on" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-eye"></use></svg>' +
+      '<svg class="ico i-off" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-eye-off"></use></svg>' +
+      '</button>');
     peek.addEventListener('click', function () {
       var showing = pw.type === 'text';
       pw.type = showing ? 'password' : 'text';
-      peek.textContent = showing ? 'Show' : 'Hide';
-      peek.setAttribute('aria-label', (showing ? 'Show' : 'Hide') + ' password');
+      peek.setAttribute('aria-pressed', showing ? 'false' : 'true');
+      peek.setAttribute('aria-label', showing ? 'Show password' : 'Hide password');
       pw.focus();
     });
-    pwBox.appendChild(pw); pwBox.appendChild(peek);
-    pwWrap.appendChild(pwBox);
-    form.appendChild(pwWrap);
+    pwField.appendChild(peek);
+    form.appendChild(pwField);
 
     var btn = el('<button class="si-btn" type="submit">Sign in</button>');
     form.appendChild(btn);
     card.appendChild(form);
 
-    function fail(msg) {
-      err.querySelector('span').textContent = msg;
+    function fail(msg, hint, only) {
+      err.querySelector('.t').textContent = msg;
+      var h = err.querySelector('.h');
+      h.textContent = hint || '';
+      h.hidden = !hint;
       err.hidden = false;
-      email.setAttribute('aria-invalid', 'true');
-      pw.setAttribute('aria-invalid', 'true');
-      pw.value = ''; pw.focus();
+
+      (only === 'email' ? [emailField] : only === 'pw' ? [pwField] : [emailField, pwField])
+        .forEach(function (f) { f.classList.add('bad'); f.input.setAttribute('aria-invalid', 'true'); });
+
+      /* Restart the shake even when the last attempt also failed - without the
+         reflow the class is already there and the animation never replays. */
+      card.classList.remove('shake');
+      void card.offsetWidth;
+      card.classList.add('shake');
     }
     function clearErr() {
       err.hidden = true;
-      email.removeAttribute('aria-invalid'); pw.removeAttribute('aria-invalid');
+      [emailField, pwField].forEach(function (f) {
+        f.classList.remove('bad'); f.input.removeAttribute('aria-invalid');
+      });
     }
     email.addEventListener('input', clearErr);
     pw.addEventListener('input', clearErr);
 
+    var attempts = 0;      /* consecutive failures in this page, for the hint above */
+
     form.addEventListener('submit', function (ev) {
       ev.preventDefault();
       clearErr();
-      if (!email.value.trim()) { fail('Enter your email address.'); email.focus(); return; }
-      if (!pw.value) { fail('Enter your password.'); return; }
+      if (!email.value.trim()) { fail('Enter your email address.', null, 'email'); email.focus(); return; }
+      if (!pw.value) { fail('Enter your password.', null, 'pw'); pw.focus(); return; }
 
       btn.disabled = true;
       btn.innerHTML = '<span class="si-spin" aria-hidden="true"></span>Signing in…';
@@ -132,9 +156,17 @@
       }).then(function (out) {
         btn.disabled = false; btn.textContent = 'Sign in';
         if (!out.ok || !out.data.user) {
-          fail((out.data && out.data.message) || 'That email and password do not match an account.');
+          attempts++;
+          /* The server says the same thing for a wrong password, an unknown
+             address and a locked account - anything else would confirm who has
+             one. Counting our own failures lets us explain the lockout without
+             telling anyone whether that particular address exists. */
+          fail((out.data && out.data.message) || 'That email and password do not match an account.',
+               attempts >= 3 ? 'Ten failed attempts lock an account for 15 minutes.' : null);
+          pw.value = ''; pw.focus();
           return;
         }
+        attempts = 0;
         session = out.data.user;
         AUTH.loadData().then(function () {
           apply();

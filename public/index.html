@@ -1515,42 +1515,95 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
 
 .si-panel{display:flex;align-items:center;justify-content:center;padding:clamp(24px,4vw,48px)}
 .si-card{width:100%;max-width:392px}
-.si-card h1{font-size:25px;letter-spacing:-.024em;margin-bottom:6px}
-.si-lede{color:var(--text-3);font-size:13.5px;margin:0 0 26px}
-.si-form{display:grid;gap:16px}
-.si-lab{display:block;font-size:12.5px;font-weight:550;color:var(--text-2);margin-bottom:6px;letter-spacing:-.004em}
-.si-in{width:100%;height:44px;padding:0 13px;border:1px solid var(--border-strong);
-  border-radius:var(--r-2);background:var(--layer);color:var(--text);font-size:14.5px;
-  transition:border-color .12s,box-shadow .12s}
-.si-in:hover{border-color:var(--text-3)}
-.si-in:focus{outline:none;border-color:var(--focus);box-shadow:0 0 0 3px color-mix(in srgb,var(--focus) 22%,transparent)}
-.si-in[aria-invalid="true"]{border-color:var(--err)}
-.si-pw{position:relative}
-.si-pw .si-in{padding-right:62px}
-.si-peek{position:absolute;right:6px;top:6px;height:32px;padding:0 10px;border:0;border-radius:var(--r-1);
-  background:transparent;color:var(--text-3);font-size:12.5px;font-weight:550;cursor:pointer}
-.si-peek:hover{background:var(--layer-hover);color:var(--text-2)}
+.si-card h1{font-size:30px;font-weight:640;letter-spacing:-.032em;line-height:1.14;margin:0 0 8px}
+.si-lede{color:var(--text-3);font-size:14px;line-height:1.5;margin:0 0 30px;max-width:34ch}
+.si-form{display:grid;gap:18px}
+
+/* A field is the input with its own label inside it. The label lifts clear on
+   focus, or once there is a value, so each field carries its name without a
+   second line of text stacked above it. Input first in the DOM, so the label
+   and the reveal button can be addressed as following siblings. */
+.si-field{position:relative}
+/* Scoped to .si-field so these beat the app's generic input[type="text"]
+   rule, which is (0,1,1) and would otherwise win. It has to: revealing the
+   password switches the input to type=text, and without this the field
+   collapses from 56px to 32px mid-interaction. */
+.si-field .si-in{width:100%;height:56px;padding:23px 14px 7px;border:1px solid var(--border-strong);
+  border-radius:var(--r-md);background:var(--layer);color:var(--text);font:inherit;font-size:14.5px;
+  transition:border-color .18s ease,box-shadow .18s ease,background-color .18s ease}
+.si-field .si-in:hover{border-color:var(--text-3)}
+.si-field .si-in:focus{outline:none;border-color:var(--focus);background:var(--bg);
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--focus) 18%,transparent)}
+.si-field .si-in:-webkit-autofill{-webkit-text-fill-color:var(--text);
+  box-shadow:0 0 0 100px var(--layer) inset}
+.si-lab{position:absolute;left:15px;top:17px;font-size:14.5px;color:var(--text-3);
+  pointer-events:none;transform-origin:0 0;
+  transition:transform .18s cubic-bezier(.2,.7,.3,1),color .18s ease}
+.si-field .si-in:focus~.si-lab,.si-field .si-in:not(:placeholder-shown)~.si-lab{transform:translateY(-10px) scale(.78)}
+.si-field .si-in:focus~.si-lab{color:var(--focus)}
+
+/* The ruled line drawn under a focused field. A ledger's own gesture, and the
+   only motion on this screen that is not answering a click. */
+.si-field::after{content:"";position:absolute;left:1px;right:1px;bottom:0;height:2px;
+  background:var(--focus);border-radius:0 0 var(--r-md) var(--r-md);
+  transform:scaleX(0);transform-origin:0 50%;pointer-events:none;
+  transition:transform .26s cubic-bezier(.2,.7,.3,1)}
+.si-field:focus-within::after{transform:scaleX(1)}
+.si-field.bad .si-in{border-color:var(--err)}
+.si-field.bad::after{background:var(--err);transform:scaleX(1)}
+.si-field.bad .si-lab{color:var(--err)}
+
+.si-field.pw .si-in{padding-right:52px}
+.si-peek{position:absolute;right:9px;top:50%;transform:translateY(-50%);width:34px;height:34px;
+  display:grid;place-items:center;border:0;border-radius:var(--r-xs);background:transparent;
+  color:var(--text-3);cursor:pointer;transition:background-color .15s ease,color .15s ease}
+.si-peek:hover{background:var(--layer-hover);color:var(--text)}
+.si-peek:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.si-peek .ico{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;
+  stroke-linecap:round;stroke-linejoin:round}
+.si-peek .i-off{display:none}
+.si-peek[aria-pressed="true"] .i-on{display:none}
+.si-peek[aria-pressed="true"] .i-off{display:block}
+
 /* Own token, not --brand-accent: that one is lightened in dark mode for links,
    and white text on it falls to 2.98:1. This holds 5.3:1 in both themes. */
-.si-btn{height:44px;border:0;border-radius:var(--r-2);background:#4f46e5;color:#fff;
-  font-size:14.5px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:9px;
-  transition:filter .12s}
-.si-btn:hover{filter:brightness(1.08)}
+.si-btn{height:50px;margin-top:2px;border:0;border-radius:var(--r-md);background:#4f46e5;color:#fff;
+  font:inherit;font-size:14.5px;font-weight:560;letter-spacing:-.008em;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;gap:9px;
+  box-shadow:0 1px 2px rgba(79,70,229,.3),0 8px 20px -8px rgba(79,70,229,.55);
+  transition:filter .15s ease,transform .12s ease,box-shadow .15s ease}
+.si-btn:hover:not(:disabled){filter:brightness(1.07);transform:translateY(-1px);
+  box-shadow:0 1px 2px rgba(79,70,229,.3),0 12px 24px -10px rgba(79,70,229,.6)}
+.si-btn:active:not(:disabled){transform:translateY(0)}
+.si-btn:focus-visible{outline:2px solid var(--focus);outline-offset:3px}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .si-btn{background:#5b56ea}}
 :root[data-theme="dark"] .si-btn{background:#5b56ea}
-.si-btn:disabled{opacity:.6;cursor:default}
+.si-btn:disabled{opacity:.62;cursor:default;box-shadow:none;transform:none}
+
 /* --err on --err-bg is 4.41:1 in light, just under AA for body text, so the
    sign-in error states its own darker red. Dark theme's --err already passes. */
-.si-err{display:flex;gap:9px;align-items:flex-start;background:var(--err-bg);border:1px solid var(--err-line);
-  color:#b91c1c;border-radius:var(--r-2);padding:11px 13px;font-size:13px;line-height:1.45}
+.si-err{display:flex;gap:10px;align-items:flex-start;background:var(--err-bg);
+  border:1px solid var(--err-line);color:#b91c1c;border-radius:var(--r-md);
+  padding:12px 14px;font-size:13px;line-height:1.45;
+  animation:si-drop .24s cubic-bezier(.2,.7,.3,1)}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .si-err{color:var(--err)}}
 :root[data-theme="dark"] .si-err{color:var(--err)}
 .si-err[hidden]{display:none}
 .si-err .ico{width:16px;height:16px;flex:none;margin-top:1px;fill:none;stroke:currentColor;stroke-width:2.2}
+.si-err .t{font-weight:600}
+.si-err .h{display:block;margin-top:3px;opacity:.85;font-weight:400}
+.si-err .h[hidden]{display:none}
+@keyframes si-drop{from{opacity:0;transform:translateY(-7px)}to{opacity:1;transform:none}}
+@keyframes si-shake{10%,90%{transform:translateX(-1px)}20%,80%{transform:translateX(2px)}
+  30%,50%,70%{transform:translateX(-4px)}40%,60%{transform:translateX(4px)}}
+.si-card.shake{animation:si-shake .48s cubic-bezier(.36,.07,.19,.97)}
 .si-spin{width:15px;height:15px;border:2px solid rgba(255,255,255,.42);border-top-color:#fff;
   border-radius:50%;animation:si-turn .7s linear infinite}
 @keyframes si-turn{to{transform:rotate(360deg)}}
-@media (prefers-reduced-motion:reduce){.si-spin{animation-duration:2.4s}}
+@media (prefers-reduced-motion:reduce){
+  .si-spin{animation-duration:2.4s}
+  .si-card.shake,.si-err{animation:none}
+  .si-in,.si-lab,.si-field::after,.si-btn,.si-peek{transition:none}}
 
 /* Demo accounts. DELETE THIS BLOCK (and its markup) before real use. */
 .si-demo{margin-top:26px;border-top:1px solid var(--border);padding-top:18px}
@@ -1562,7 +1615,7 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
 .si-demo[open]>summary .ico{transform:rotate(90deg)}
 .si-accs{display:grid;gap:6px;margin-top:12px}
 .si-acc{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:9px 11px;
-  border:1px solid var(--border);border-radius:var(--r-2);background:var(--layer);cursor:pointer;
+  border:1px solid var(--border);border-radius:var(--r-md);background:var(--layer);cursor:pointer;
   color:var(--text-2);font-size:12.5px}
 .si-acc:hover{border-color:var(--border-strong);background:var(--layer-hover)}
 .si-acc b{color:var(--text);font-weight:550}
@@ -1588,7 +1641,7 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
 .acct-who .em{font-size:12px;color:var(--text-3);margin-top:2px;word-break:break-all}
 .acct-who .rl{display:inline-block;margin-top:8px;font-size:11px;text-transform:uppercase;
   letter-spacing:.05em;color:var(--sel-ink);background:var(--sel-bg);padding:2px 8px;border-radius:999px}
-.acct-item{display:flex;align-items:center;gap:10px;width:100%;padding:9px 12px;border:0;border-radius:var(--r-2);
+.acct-item{display:flex;align-items:center;gap:10px;width:100%;padding:9px 12px;border:0;border-radius:var(--r-md);
   background:transparent;color:var(--text-2);font-size:13.5px;cursor:pointer;text-align:left}
 .acct-item:hover{background:var(--layer-hover);color:var(--text)}
 .acct-item .ico{width:16px;height:16px;flex:none;fill:none;stroke:currentColor;stroke-width:2}
@@ -1658,6 +1711,8 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
   <symbol id="i-columns" viewBox="0 0 24 24"><!-- lucide:columns-3 --><rect width="18" height="18" x="3" y="3" rx="2" /><path d="M9 3v18" /><path d="M15 3v18" /></symbol>
   <symbol id="i-search" viewBox="0 0 24 24"><!-- lucide:search --><path d="m21 21-4.34-4.34" /><circle cx="11" cy="11" r="8" /></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><!-- lucide:check --><path d="M20 6 9 17l-5-5" /></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><!-- lucide:eye --><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" /><circle cx="12" cy="12" r="3" /></symbol>
+  <symbol id="i-eye-off" viewBox="0 0 24 24"><!-- lucide:eye-off --><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" /><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c6.5 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" /><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3.5 7 10 7a9.74 9.74 0 0 0 5.39-1.61" /><path d="m2 2 20 20" /></symbol>
   <symbol id="i-info" viewBox="0 0 24 24"><!-- lucide:info --><circle cx="12" cy="12" r="10" /><path d="M12 16v-4" /><path d="M12 8h.01" /></symbol>
 </svg>
 <div class="app">
@@ -8929,57 +8984,81 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
 
     var form = el('<form class="si-form" novalidate></form>');
 
-    var err = el('<div class="si-err" role="alert" hidden>' +
-      '<svg class="ico" viewBox="0 0 24 24"><use href="#i-info"></use></svg><span></span></div>');
+    var err = el('<div class="si-err" role="alert" aria-live="assertive" hidden>' +
+      '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-info"></use></svg>' +
+      '<span><span class="t"></span><span class="h" hidden></span></span></div>');
     form.appendChild(err);
 
-    var emailWrap = el('<div></div>');
-    emailWrap.appendChild(el('<label class="si-lab" for="si-email">Email</label>'));
-    var email = el('<input class="si-in" id="si-email" type="email" name="email" autocomplete="username" ' +
-      'placeholder="you@codetoclick.ai" required>');
-    emailWrap.appendChild(email);
-    form.appendChild(emailWrap);
+    /* Input first, label second: the label and the reveal button are styled as
+       following siblings of the input, which is what lets the label lift on
+       :focus and on :not(:placeholder-shown). The placeholder is a single
+       space on purpose - a real one would defeat that selector. */
+    function field(id, type, label, ac, cls) {
+      var f = el('<div class="si-field' + (cls ? ' ' + cls : '') + '"></div>');
+      var input = el('<input class="si-in" id="' + id + '" type="' + type + '" ' +
+        'name="' + id.replace('si-', '') + '" autocomplete="' + ac + '" placeholder=" " required>');
+      f.appendChild(input);
+      f.appendChild(el('<label class="si-lab" for="' + id + '">' + esc(label) + '</label>'));
+      f.input = input;
+      return f;
+    }
 
-    var pwWrap = el('<div></div>');
-    pwWrap.appendChild(el('<label class="si-lab" for="si-pw">Password</label>'));
-    var pwBox = el('<div class="si-pw"></div>');
-    var pw = el('<input class="si-in" id="si-pw" type="password" name="password" ' +
-      'autocomplete="current-password" placeholder="••••••••••" required>');
-    var peek = el('<button type="button" class="si-peek" aria-label="Show password">Show</button>');
+    var emailField = field('si-email', 'email', 'Email address', 'username');
+    var email = emailField.input;
+    form.appendChild(emailField);
+
+    var pwField = field('si-pw', 'password', 'Password', 'current-password', 'pw');
+    var pw = pwField.input;
+    var peek = el('<button type="button" class="si-peek" aria-pressed="false" aria-label="Show password">' +
+      '<svg class="ico i-on" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-eye"></use></svg>' +
+      '<svg class="ico i-off" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-eye-off"></use></svg>' +
+      '</button>');
     peek.addEventListener('click', function () {
       var showing = pw.type === 'text';
       pw.type = showing ? 'password' : 'text';
-      peek.textContent = showing ? 'Show' : 'Hide';
-      peek.setAttribute('aria-label', (showing ? 'Show' : 'Hide') + ' password');
+      peek.setAttribute('aria-pressed', showing ? 'false' : 'true');
+      peek.setAttribute('aria-label', showing ? 'Show password' : 'Hide password');
       pw.focus();
     });
-    pwBox.appendChild(pw); pwBox.appendChild(peek);
-    pwWrap.appendChild(pwBox);
-    form.appendChild(pwWrap);
+    pwField.appendChild(peek);
+    form.appendChild(pwField);
 
     var btn = el('<button class="si-btn" type="submit">Sign in</button>');
     form.appendChild(btn);
     card.appendChild(form);
 
-    function fail(msg) {
-      err.querySelector('span').textContent = msg;
+    function fail(msg, hint, only) {
+      err.querySelector('.t').textContent = msg;
+      var h = err.querySelector('.h');
+      h.textContent = hint || '';
+      h.hidden = !hint;
       err.hidden = false;
-      email.setAttribute('aria-invalid', 'true');
-      pw.setAttribute('aria-invalid', 'true');
-      pw.value = ''; pw.focus();
+
+      (only === 'email' ? [emailField] : only === 'pw' ? [pwField] : [emailField, pwField])
+        .forEach(function (f) { f.classList.add('bad'); f.input.setAttribute('aria-invalid', 'true'); });
+
+      /* Restart the shake even when the last attempt also failed - without the
+         reflow the class is already there and the animation never replays. */
+      card.classList.remove('shake');
+      void card.offsetWidth;
+      card.classList.add('shake');
     }
     function clearErr() {
       err.hidden = true;
-      email.removeAttribute('aria-invalid'); pw.removeAttribute('aria-invalid');
+      [emailField, pwField].forEach(function (f) {
+        f.classList.remove('bad'); f.input.removeAttribute('aria-invalid');
+      });
     }
     email.addEventListener('input', clearErr);
     pw.addEventListener('input', clearErr);
 
+    var attempts = 0;      /* consecutive failures in this page, for the hint above */
+
     form.addEventListener('submit', function (ev) {
       ev.preventDefault();
       clearErr();
-      if (!email.value.trim()) { fail('Enter your email address.'); email.focus(); return; }
-      if (!pw.value) { fail('Enter your password.'); return; }
+      if (!email.value.trim()) { fail('Enter your email address.', null, 'email'); email.focus(); return; }
+      if (!pw.value) { fail('Enter your password.', null, 'pw'); pw.focus(); return; }
 
       btn.disabled = true;
       btn.innerHTML = '<span class="si-spin" aria-hidden="true"></span>Signing in…';
@@ -8992,9 +9071,17 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
       }).then(function (out) {
         btn.disabled = false; btn.textContent = 'Sign in';
         if (!out.ok || !out.data.user) {
-          fail((out.data && out.data.message) || 'That email and password do not match an account.');
+          attempts++;
+          /* The server says the same thing for a wrong password, an unknown
+             address and a locked account - anything else would confirm who has
+             one. Counting our own failures lets us explain the lockout without
+             telling anyone whether that particular address exists. */
+          fail((out.data && out.data.message) || 'That email and password do not match an account.',
+               attempts >= 3 ? 'Ten failed attempts lock an account for 15 minutes.' : null);
+          pw.value = ''; pw.focus();
           return;
         }
+        attempts = 0;
         session = out.data.user;
         AUTH.loadData().then(function () {
           apply();
