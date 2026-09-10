@@ -981,7 +981,28 @@ tr:hover .row-act{color:var(--text-2)}
 .wb-bar .seg-toggle .ico{width:14px;height:14px;opacity:.85}
 
 .wb{display:grid;grid-template-columns:minmax(0,1fr) clamp(400px,32%,560px);gap:16px;align-items:start}
-@media (max-width:1100px){.wb{grid-template-columns:minmax(0,1fr)}}
+/* Nothing selected: the list is the screen. Once someone is picked the editor
+   is the work, so the columns swap weight - the list keeps just enough to move
+   between people, and the sliders, figures and project rows get real room
+   instead of a 400px gutter with its own scrollbar. */
+.wb.focus{grid-template-columns:minmax(210px,23%) minmax(0,1fr)}
+/* Staffing a project: the list stays a table, so it only cedes some width. */
+.wb.focus-table{grid-template-columns:minmax(0,1fr) clamp(460px,44%,760px)}
+.wb.focus .wl-head,.wb.focus .wl-row{grid-template-columns:minmax(0,1fr) 54px}
+.wb.focus .wl-head > :nth-child(2),
+.wb.focus .wl-head > :nth-child(3),
+.wb.focus .wl-head > :nth-child(5),
+.wb.focus .wl-row > .cost,
+.wb.focus .wl-row > .cap,
+.wb.focus .wl-row > .stat{display:none}
+.wb.focus .wl-row .who .sub{font-size:11px}
+.wb.focus .wb-list table.grid td:first-child strong{max-width:150px}
+@media (max-width:1100px){.wb{grid-template-columns:minmax(0,1fr)}
+  .wb.focus,.wb.focus-table{grid-template-columns:minmax(0,1fr)}
+  .wb.focus .wl-head,.wb.focus .wl-row{grid-template-columns:minmax(150px,1.6fr) 84px minmax(120px,1.4fr) 56px 112px}
+  .wb.focus .wl-head > :nth-child(2),.wb.focus .wl-head > :nth-child(3),
+  .wb.focus .wl-head > :nth-child(5),.wb.focus .wl-row > .cost,
+  .wb.focus .wl-row > .cap,.wb.focus .wl-row > .stat{display:block}}
 
 /* --- list ------------------------------------------------------------------ */
 .wb-list{background:var(--layer);border:1px solid var(--border);border-radius:var(--r-lg);

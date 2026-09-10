@@ -526,14 +526,21 @@
 
     var wb = el('<div class="wb"></div>');
     if (a.view === 'employee') {
-      wb.appendChild(peopleList(s, month, rows));
       var selEmp = a.sel && r.byEmployee[a.sel];
+      /* Once someone is picked, editing their month is the work and the list is
+         only context. Hand the width to the editor and let the list fall back
+         to a rail - see .wb.focus. */
+      if (selEmp) wb.classList.add('focus');
+      wb.appendChild(peopleList(s, month, rows));
       wb.appendChild(selEmp ? person360(s, month, selEmp)
         : el('<aside class="p360 empty">' + U.emptyState('Pick a person', 'Select someone on the left to see their whole month — capacity, cost, the projects they charge, and how their utilisation has moved.', '', 'users') + '</aside>'));
       f.appendChild(wb);
     } else if (a.view === 'project') {
-      wb.appendChild(projectList(s, month));
       var selP = a.team && r.byProject[a.team];
+      /* Not the person rail: this list is a real table with its own columns, so
+         it only gives up some width rather than collapsing. */
+      if (selP) wb.classList.add('focus-table');
+      wb.appendChild(projectList(s, month));
       wb.appendChild(selP ? project360(s, month, selP)
         : el('<aside class="p360 empty">' + U.emptyState('Pick a project', 'Select a project on the left to staff it and see its cost, revenue and margin history.', '', 'projects') + '</aside>'));
       f.appendChild(wb);

@@ -986,7 +986,28 @@ tr:hover .row-act{color:var(--text-2)}
 .wb-bar .seg-toggle .ico{width:14px;height:14px;opacity:.85}
 
 .wb{display:grid;grid-template-columns:minmax(0,1fr) clamp(400px,32%,560px);gap:16px;align-items:start}
-@media (max-width:1100px){.wb{grid-template-columns:minmax(0,1fr)}}
+/* Nothing selected: the list is the screen. Once someone is picked the editor
+   is the work, so the columns swap weight - the list keeps just enough to move
+   between people, and the sliders, figures and project rows get real room
+   instead of a 400px gutter with its own scrollbar. */
+.wb.focus{grid-template-columns:minmax(210px,23%) minmax(0,1fr)}
+/* Staffing a project: the list stays a table, so it only cedes some width. */
+.wb.focus-table{grid-template-columns:minmax(0,1fr) clamp(460px,44%,760px)}
+.wb.focus .wl-head,.wb.focus .wl-row{grid-template-columns:minmax(0,1fr) 54px}
+.wb.focus .wl-head > :nth-child(2),
+.wb.focus .wl-head > :nth-child(3),
+.wb.focus .wl-head > :nth-child(5),
+.wb.focus .wl-row > .cost,
+.wb.focus .wl-row > .cap,
+.wb.focus .wl-row > .stat{display:none}
+.wb.focus .wl-row .who .sub{font-size:11px}
+.wb.focus .wb-list table.grid td:first-child strong{max-width:150px}
+@media (max-width:1100px){.wb{grid-template-columns:minmax(0,1fr)}
+  .wb.focus,.wb.focus-table{grid-template-columns:minmax(0,1fr)}
+  .wb.focus .wl-head,.wb.focus .wl-row{grid-template-columns:minmax(150px,1.6fr) 84px minmax(120px,1.4fr) 56px 112px}
+  .wb.focus .wl-head > :nth-child(2),.wb.focus .wl-head > :nth-child(3),
+  .wb.focus .wl-head > :nth-child(5),.wb.focus .wl-row > .cost,
+  .wb.focus .wl-row > .cap,.wb.focus .wl-row > .stat{display:block}}
 
 /* --- list ------------------------------------------------------------------ */
 .wb-list{background:var(--layer);border:1px solid var(--border);border-radius:var(--r-lg);
@@ -7220,14 +7241,21 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
 
     var wb = el('<div class="wb"></div>');
     if (a.view === 'employee') {
-      wb.appendChild(peopleList(s, month, rows));
       var selEmp = a.sel && r.byEmployee[a.sel];
+      /* Once someone is picked, editing their month is the work and the list is
+         only context. Hand the width to the editor and let the list fall back
+         to a rail - see .wb.focus. */
+      if (selEmp) wb.classList.add('focus');
+      wb.appendChild(peopleList(s, month, rows));
       wb.appendChild(selEmp ? person360(s, month, selEmp)
         : el('<aside class="p360 empty">' + U.emptyState('Pick a person', 'Select someone on the left to see their whole month — capacity, cost, the projects they charge, and how their utilisation has moved.', '', 'users') + '</aside>'));
       f.appendChild(wb);
     } else if (a.view === 'project') {
-      wb.appendChild(projectList(s, month));
       var selP = a.team && r.byProject[a.team];
+      /* Not the person rail: this list is a real table with its own columns, so
+         it only gives up some width rather than collapsing. */
+      if (selP) wb.classList.add('focus-table');
+      wb.appendChild(projectList(s, month));
       wb.appendChild(selP ? project360(s, month, selP)
         : el('<aside class="p360 empty">' + U.emptyState('Pick a project', 'Select a project on the left to staff it and see its cost, revenue and margin history.', '', 'projects') + '</aside>'));
       f.appendChild(wb);
