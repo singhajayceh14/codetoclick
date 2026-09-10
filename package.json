@@ -1,0 +1,8 @@
+{
+  "name": "codetoclick",
+  "version": "1.6.0",
+  "private": true,
+  "type": "module",
+  "description": "Code to Click - Profitability Intelligence",
+  "engines": { "node": ">=20" }
+}
