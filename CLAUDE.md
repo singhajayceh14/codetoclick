@@ -105,9 +105,26 @@ Schema `c2c`. Load order, all in the Neon SQL editor:
 2. `db/c2c_operations_v1.0.sql` — the 18 write operations
 3. `db/c2c_seed_users_v1.0.sql` — starter accounts
 
-The schema file **drops and recreates** `c2c`. There are no migrations yet; if
-you need one, write it as a separate `db/migrate_*.sql` rather than editing the
-schema file, or existing data is lost.
+The schema file **drops and recreates** `c2c`. Never run it against a database
+that holds anything.
+
+Changes are applied with `npm run db:migrate` (`scripts/migrate.mjs`), which
+treats the three kinds of file differently:
+
+- **Migrations** — `db/migrations/NNN_name.sql`, applied once each in order,
+  each in a transaction, recorded with a checksum in `c2c.schema_migrations`.
+  Anything structural goes here: a column, an index, a backfill.
+- **Idempotent** — `db/c2c_operations_v1.0.sql` is `create or replace`
+  throughout, so it is re-applied on every run and the functions in the
+  database always match the repo. **New `op_*` functions go here, not into a
+  migration.**
+- **Never run by the script** — the schema file (it drops the schema) and the
+  seed file (it calls `set_password()` on all four accounts and would put them
+  back to their starter passwords).
+
+`npm run db:status` shows what is applied and pending without touching
+anything. The script reads `DATABASE_URL` from a local `.env`; that file is
+gitignored, and the value does not belong in chat.
 
 ### Tables
 
