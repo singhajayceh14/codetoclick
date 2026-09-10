@@ -56,7 +56,22 @@
   }
 
   var FIRST_MONTH = '2025-01';
-  var CURRENT_MONTH = '2026-09';
+
+  /* The month the product treats as "now", taken from the clock rather than
+     pinned to a literal. MONTHS ends here, so a hardcoded value means the app
+     silently stops accepting new months - on 1 October a build pinned to
+     '2026-09' cannot record October at all until someone edits this line and
+     rebuilds. Read once at load; a tab left open across a month boundary picks
+     it up on the next refresh. */
+  function thisMonth() { var d = new Date(); return mkey(d.getFullYear(), d.getMonth() + 1); }
+  var CURRENT_MONTH = thisMonth();
+
+  /* The sample company is calibrated to September 2026 - the revenue targets
+     below, the payroll scaling, and the worked example from the spec all assume
+     it. That anchor must not move with the clock or the demo figures stop
+     matching the document they came from. Real data never reaches any of it:
+     buildMonth() returns an empty month when DATA_MODE is 'own'. */
+  var DEMO_MONTH = '2026-09';
   var MONTHS = [];
   for (var i = mindex(FIRST_MONTH); i <= mindex(CURRENT_MONTH); i++) MONTHS.push(mfromIndex(i));
 
@@ -218,7 +233,7 @@
   var CTC_SCALE = (function () {
     var pinnedMonthly = 0, freeMonthly = 0;
     EMPLOYEES.forEach(function (e) {
-      var m = e.baseCtc * Math.pow(1.05, raiseCount(e, CURRENT_MONTH)) / 12;
+      var m = e.baseCtc * Math.pow(1.05, raiseCount(e, DEMO_MONTH)) / 12;
       if (e.pinned) pinnedMonthly += e.baseCtc / 12; else freeMonthly += m;
     });
     return (142800 - pinnedMonthly) / freeMonthly;
@@ -234,7 +249,7 @@
   var CTC_RESIDUAL = (function () {
     var sum = 0;
     EMPLOYEES.forEach(function (e) {
-      if (mindex(CURRENT_MONTH) >= mindex(e.join)) sum += rawCtc(e, CURRENT_MONTH);
+      if (mindex(DEMO_MONTH) >= mindex(e.join)) sum += rawCtc(e, DEMO_MONTH);
     });
     return 142800 * 12 - sum;
   })();
@@ -280,7 +295,7 @@
       // ramp up over the first three months, then drift with monthly noise
       // projects that predate the record window are already at full run-rate
       var ramp = p.start === FIRST_MONTH ? 1 : Math.min(1, 0.45 + 0.28 * age(p));
-      var drift = 1 - 0.006 * (mindex(CURRENT_MONTH) - mindex(month));
+      var drift = 1 - 0.006 * (mindex(DEMO_MONTH) - mindex(month));
       return { id: p.id, v: p.baseRev * ramp * drift * jitter(p.id + month + 'rev', 0.07) };
     });
     var sum = raw.reduce(function (a, r) { return a + r.v; }, 0);
@@ -345,7 +360,7 @@
     }
 
     // Pinned worked example from the spec — John Smith, September 2026.
-    if (month === CURRENT_MONTH) {
+    if (month === DEMO_MONTH) {
       cap['E01'] = 100; assign('E01', 'P01', 60); assign('E01', 'P02', 30);
       alloc['E01'].INTERNAL = 10; used['E01'] = 100;
       cap['E02'] = 100; assign('E02', 'P01', 100);
@@ -455,6 +470,11 @@
 
   function buildMonth(month) {
     if (DATA_MODE === 'own') return emptyMonth(month);
+    /* The sample company only has targets up to DEMO_MONTH. Once the clock
+       passes it there is nothing to generate, and an empty month is the honest
+       answer - the alternative is TARGET[month] coming back undefined and every
+       figure on the screen throwing. */
+    if (!TARGET[month]) return emptyMonth(month);
     var revenue = buildRevenue(month);
     var a = buildAllocations(month, revenue);
     var empCostTotal = 0;
