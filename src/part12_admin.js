@@ -23,8 +23,15 @@
     { v: 'projects', l: 'Projects', i: 'projects', n: function () { return C.PROJECTS.length; } },
     { v: 'employees', l: 'People', i: 'employees', n: function () { return C.EMPLOYEES.length; } },
     { v: 'licences', l: 'Licences', i: 'licence', n: function () { return C.LICENCES.length; } },
-    { v: 'backup', l: 'Backup & restore', i: 'archive', n: null }
+    { v: 'backup', l: 'Backup & restore', i: 'archive', n: null },
+    /* Owner only. The server enforces this too - hiding a tab is not a
+       permission, and api/mutate.js assumes it is called directly. */
+    { v: 'accounts', l: 'Accounts', i: 'employees', n: null,
+      when: function () { return root.AUTH && root.AUTH.role() === 'owner'; } }
   ];
+  function visibleTabs() {
+    return TABS.filter(function (t) { return !t.when || t.when(); });
+  }
   var TYPES = ['Fixed project', 'Retainer', 'Time & materials', 'Milestone'];
   var DISC = [
     { v: 'eng', l: 'Build / configuration' }, { v: 'data', l: 'Data 360' },
@@ -263,7 +270,7 @@
      register, so the section header doubles as a summary.                    */
   function tabBar(a) {
     var bar = el('<div class="tabbar" role="tablist" aria-label="Administration sections"></div>');
-    var btns = TABS.map(function (t) {
+    var btns = visibleTabs().map(function (t) {
       var on = a.tab === t.v;
       var b = el('<button type="button" role="tab" aria-selected="' + on + '" tabindex="' + (on ? 0 : -1) + '">' +
         U.icon(t.i) + '<span>' + esc(t.l) + '</span>' +
@@ -297,6 +304,7 @@
     else if (a.tab === 'projects') f.appendChild(projectsPane(m));
     else if (a.tab === 'employees') f.appendChild(peoplePane(m));
     else if (a.tab === 'licences') f.appendChild(root.App.licencePane ? root.App.licencePane(m) : el('<div class="empty">Licences are unavailable.</div>'));
+    else if (a.tab === 'accounts') f.appendChild(accountsPane());
     else f.appendChild(backupPane());
     return f;
   };
@@ -522,6 +530,67 @@
     }, 'trash');
     root.App.openDialog('Clear all data', body, [go], 'Start from an empty company');
   }
+  /* ---------- accounts ------------------------------------------------------ */
+  function accountsPane() {
+    var wrap = el('<div class="stack"></div>');
+    var me = root.AUTH && root.AUTH.user ? root.AUTH.user() : null;
+    var others = C.USERS.filter(function (u) { return !me || u.email !== me.email; });
+
+    var list = el('<div class="set-list"></div>');
+    C.USERS.forEach(function (u) {
+      var mine = me && u.email === me.email;
+      list.appendChild(rowOf(u.name || u.email,
+        esc(u.email) + ' &middot; ' + esc(u.role) + (mine ? ' &middot; this is you' : '') +
+        (u.active === false ? ' &middot; <span class="tag">inactive</span>' : ''),
+        el('<span class="tag">' + esc(u.role) + '</span>')));
+    });
+    wrap.appendChild(U.panel('Accounts', C.USERS.length + ' sign-in' + (C.USERS.length === 1 ? '' : 's') +
+      ' in this organization', list, true));
+
+    var put = el('<div style="display:flex;flex-direction:column;gap:12px"></div>');
+    put.appendChild(el('<div class="callout" style="border-left-color:var(--warn-line)">' +
+      '<strong>A reset signs that person out everywhere.</strong> Every session they have open ends ' +
+      'immediately, which is the point if the password leaked. They will need the new password to get ' +
+      'back in, so tell them what it is.</div>'));
+
+    if (!others.length) {
+      put.appendChild(el('<div class="empty">There is no other account in this organization to reset.</div>'));
+      wrap.appendChild(U.panel('Reset a password', null, put, true));
+      return wrap;
+    }
+
+    var pick = U.field({ label: 'Account', type: 'select', required: true,
+      options: others.map(function (u) {
+        return { v: u.email, l: (u.name || u.email) + ' - ' + u.email + ' (' + u.role + ')' };
+      }) });
+    var pair = U.passwordPair('New password for this account');
+    var msg  = el('<div style="min-height:17px;font-size:12px"></div>');
+    var go   = H.btn('Reset this password', 'btn-primary', function () {
+      msg.textContent = ''; msg.className = '';
+      if (!pair.validate()) return;
+      go.disabled = true;
+      C.adminSetPassword(pick.value(), pair.value()).then(function (out) {
+        go.disabled = false;
+        if (out && out.ok) {
+          pair.clear();
+          msg.className = 'ok';
+          msg.textContent = 'Password reset for ' + pick.value() + '. Their sessions have ended.';
+          U.toast('Password reset', { kind: 'success', detail: pick.value() + ' must sign in again.' });
+        } else {
+          msg.className = 'err';
+          msg.textContent = (out && out.data && out.data.message) || 'That change could not be saved.';
+        }
+      });
+    });
+    put.appendChild(U.formGrid([pick].concat(pair.fields)));
+    put.appendChild(msg);
+    var bar = el('<div></div>'); bar.appendChild(go); put.appendChild(bar);
+    put.appendChild(el('<div class="fl-hint">To change your own password, use Settings - it keeps you ' +
+      'signed in and asks for your current one.</div>'));
+    wrap.appendChild(U.panel('Reset a password', 'Owner only', put, true));
+    return wrap;
+  }
+
   function rowOf(label, hint, control) {
     var r = el('<div class="set-row"><div class="set-lab"><strong>' + esc(label) + '</strong><span>' + hint + '</span></div></div>');
     r.appendChild(control);

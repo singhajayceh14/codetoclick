@@ -73,6 +73,39 @@
     r.appendChild(control);
     return r;
   }
+  /* Change your own password. Available to every role, viewers included -
+     locking a read-only account out of its own credentials helps nobody. */
+  function myPasswordForm() {
+    var cur  = U.field({ label: 'Current password', type: 'password', required: true });
+    var pair = U.passwordPair();
+    var msg  = el('<div style="min-height:17px;font-size:12px"></div>');
+    var go   = H.btn('Change password', 'btn-primary', function () {
+      msg.textContent = ''; msg.className = '';
+      cur.clear();
+      if (!cur.value()) { cur.fail('Enter your current password.'); return; }
+      if (!pair.validate()) return;
+      if (cur.value() === pair.value()) { pair.fields[0].fail('That is already your password.'); return; }
+      go.disabled = true;
+      C.setOwnPassword(cur.value(), pair.value()).then(function (out) {
+        go.disabled = false;
+        if (out && out.ok) {
+          cur.input.value = ''; cur.clear(); pair.clear();
+          msg.className = 'ok';
+          msg.textContent = 'Password changed. Any other sign-in for your account has been signed out.';
+          U.toast('Password changed', { kind: 'success' });
+        } else {
+          msg.className = 'err';
+          msg.textContent = (out && out.data && out.data.message) || 'That change could not be saved.';
+        }
+      });
+    });
+    var w = el('<div style="display:flex;flex-direction:column;gap:11px;min-width:min(420px,100%)"></div>');
+    w.appendChild(U.formGrid([cur].concat(pair.fields)));
+    w.appendChild(msg);
+    var bar = el('<div></div>'); bar.appendChild(go); w.appendChild(bar);
+    return w;
+  }
+
   function seg(value, options, onPick) {
     var w = el('<div class="seg-toggle" role="group"></div>');
     options.forEach(function (o) {
@@ -202,6 +235,24 @@
         function (v) { change('defaultPeriod', v); })));
     g.appendChild(U.panel('Defaults', null, df, true));
     f.appendChild(g);
+
+    /* --- account --- */
+    var who = root.AUTH && root.AUTH.user ? root.AUTH.user() : null;
+    f.appendChild(H.section('Account'));
+    var acct = el('<div class="set-list"></div>');
+    if (who) {
+      acct.appendChild(row('Signed in as', 'Your role decides what you may change. It is set by the owner.',
+        el('<div class="set-preview"><span><b>' + esc(who.email || '') + '</b></span>' +
+           '<span><b>' + esc(who.role || '') + '</b>role</span></div>')));
+    }
+    acct.appendChild(row('Change my password',
+      'You stay signed in here. Every other sign-in for your account is ended, on this computer and any other.',
+      myPasswordForm()));
+    if (who && who.role === 'owner') {
+      acct.appendChild(row('Reset someone else', 'Owners can set a new password for any account in the organization.',
+        H.btn('Open administration', '', function () { root.App.go('admin', { tab: 'accounts' }); })));
+    }
+    f.appendChild(U.panel('Account', null, acct, true));
 
     /* --- data --- */
     f.appendChild(H.section('Data'));

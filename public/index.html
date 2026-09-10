@@ -2008,6 +2008,9 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
      it so a backup can record which months were closed and a restore can put
      them back that way. */
   var PERIOD_STATUS = {};
+  /* Sign-in accounts for this organization, filled from /api/state. These are
+     logins, not the payroll register - EMPLOYEES is a different thing. */
+  var USERS = [];
 
   var PINNED_REVENUE = { '2026-09': { P01: 40000 } };
 
@@ -2240,7 +2243,9 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
     if (SYNC.onBusy) SYNC.onBusy(SYNC.pending > 0);
   }
 
-  function sync(op, args) {
+  /* quiet: handle the failure at the call site instead of raising the global
+     error toast. A password form wants its message beside the field. */
+  function sync(op, args, quiet) {
     if (!SYNC.on) return Promise.resolve({ ok: true });
     busy(1);
     return fetch('/api/mutate', {
@@ -2254,7 +2259,7 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
       busy(-1);
       if (!out.ok) {
         var msg = (out.data && out.data.message) || 'That change could not be saved.';
-        if (SYNC.onError) SYNC.onError(msg, out.status);
+        if (!quiet && SYNC.onError) SYNC.onError(msg, out.status);
       }
       return out;
     }).catch(function () {
@@ -2280,6 +2285,7 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
       STORE[m].empCost = src.empCost || {};
       STORE[m].other   = src.other   || [];
     });
+    USERS.length = 0; (st.users || []).forEach(function (x) { USERS.push(x); });
     Object.keys(PERIOD_STATUS).forEach(function (k) { delete PERIOD_STATUS[k]; });
     (st.periods || []).forEach(function (p) {
       if (p && p.month) PERIOD_STATUS[p.month] = p.status === 'closed' ? 'closed' : 'open';
@@ -2300,6 +2306,17 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
         return true;
       })
       .catch(function () { return false; });
+  }
+
+  /* Passwords. Unlike the figure mutations these are async on purpose: there is
+     no local state to update, and the caller needs to know whether it worked.
+     The server takes the caller from the session cookie - the browser never
+     says who it is. */
+  function setOwnPassword(current, next) {
+    return sync('setOwnPassword', { current: current, next: next }, true);
+  }
+  function adminSetPassword(email, next) {
+    return sync('adminSetPassword', { email: email, next: next }, true);
   }
 
   function persist() { }          /* the server is the record now */
@@ -2875,6 +2892,7 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
     addProject: addProject, updateProject: updateProject, archiveProject: archiveProject, deleteProject: deleteProject,
     updateEmployee: updateEmployee, setEmployeeCtc: setEmployeeCtc, deleteEmployee: deleteEmployee,
     exportState: exportState, importState: importState, byId: byId,
+    USERS: USERS, setOwnPassword: setOwnPassword, adminSetPassword: adminSetPassword,
     loadFromServer: loadFromServer, syncState: SYNC
   };
 })(typeof window !== 'undefined' ? window : globalThis);
@@ -3792,6 +3810,27 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
     input.addEventListener('input', function () { if (f.classList.contains('invalid')) f.clear(); });
     return f;
   }
+  /* A new password and its repeat, carrying the same minimum the database
+     enforces in assert_password_ok(). One place for the rule, so the message on
+     the screen and the one from PostgreSQL cannot drift apart. */
+  var PASSWORD_MIN = 10;
+  function passwordPair(labelNew, labelRepeat) {
+    var a = field({ label: labelNew || 'New password', type: 'password', required: true,
+                    hint: 'At least ' + PASSWORD_MIN + ' characters.' });
+    var b = field({ label: labelRepeat || 'Repeat new password', type: 'password', required: true });
+    return {
+      fields: [a, b],
+      value: function () { return a.value(); },
+      clear: function () { a.input.value = ''; b.input.value = ''; a.clear(); b.clear(); },
+      validate: function () {
+        a.clear(); b.clear();
+        if (a.value().length < PASSWORD_MIN) return a.fail('At least ' + PASSWORD_MIN + ' characters.');
+        if (a.value() !== b.value()) return b.fail('The two passwords do not match.');
+        return true;
+      }
+    };
+  }
+
   function formGrid(fields) {
     var g = el('<div class="form-grid"></div>');
     fields.forEach(function (x) { g.appendChild(x); });
@@ -3944,7 +3983,8 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
     segbar: segbar, breakdown: breakdown, bullet: bullet, sparkline: sparkline,
     table: table, setDensity: setDensity, toast: toast, panel: panel,
     sumStrip: sumStrip, insightCard: insightCard, emptyState: emptyState, toolOnProjects: toolOnProjects,
-    icon: icon, hideTip: hideTip, field: field, formGrid: formGrid, formSection: formSection, readout: readout, kpi: kpi, metric: metric, hero: hero, tile: tile
+    icon: icon, hideTip: hideTip, field: field, passwordPair: passwordPair,
+    PASSWORD_MIN: PASSWORD_MIN, formGrid: formGrid, formSection: formSection, readout: readout, kpi: kpi, metric: metric, hero: hero, tile: tile
   };
 })(typeof window !== 'undefined' ? window : globalThis);
 </script>
@@ -7153,6 +7193,39 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
     r.appendChild(control);
     return r;
   }
+  /* Change your own password. Available to every role, viewers included -
+     locking a read-only account out of its own credentials helps nobody. */
+  function myPasswordForm() {
+    var cur  = U.field({ label: 'Current password', type: 'password', required: true });
+    var pair = U.passwordPair();
+    var msg  = el('<div style="min-height:17px;font-size:12px"></div>');
+    var go   = H.btn('Change password', 'btn-primary', function () {
+      msg.textContent = ''; msg.className = '';
+      cur.clear();
+      if (!cur.value()) { cur.fail('Enter your current password.'); return; }
+      if (!pair.validate()) return;
+      if (cur.value() === pair.value()) { pair.fields[0].fail('That is already your password.'); return; }
+      go.disabled = true;
+      C.setOwnPassword(cur.value(), pair.value()).then(function (out) {
+        go.disabled = false;
+        if (out && out.ok) {
+          cur.input.value = ''; cur.clear(); pair.clear();
+          msg.className = 'ok';
+          msg.textContent = 'Password changed. Any other sign-in for your account has been signed out.';
+          U.toast('Password changed', { kind: 'success' });
+        } else {
+          msg.className = 'err';
+          msg.textContent = (out && out.data && out.data.message) || 'That change could not be saved.';
+        }
+      });
+    });
+    var w = el('<div style="display:flex;flex-direction:column;gap:11px;min-width:min(420px,100%)"></div>');
+    w.appendChild(U.formGrid([cur].concat(pair.fields)));
+    w.appendChild(msg);
+    var bar = el('<div></div>'); bar.appendChild(go); w.appendChild(bar);
+    return w;
+  }
+
   function seg(value, options, onPick) {
     var w = el('<div class="seg-toggle" role="group"></div>');
     options.forEach(function (o) {
@@ -7283,6 +7356,24 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
     g.appendChild(U.panel('Defaults', null, df, true));
     f.appendChild(g);
 
+    /* --- account --- */
+    var who = root.AUTH && root.AUTH.user ? root.AUTH.user() : null;
+    f.appendChild(H.section('Account'));
+    var acct = el('<div class="set-list"></div>');
+    if (who) {
+      acct.appendChild(row('Signed in as', 'Your role decides what you may change. It is set by the owner.',
+        el('<div class="set-preview"><span><b>' + esc(who.email || '') + '</b></span>' +
+           '<span><b>' + esc(who.role || '') + '</b>role</span></div>')));
+    }
+    acct.appendChild(row('Change my password',
+      'You stay signed in here. Every other sign-in for your account is ended, on this computer and any other.',
+      myPasswordForm()));
+    if (who && who.role === 'owner') {
+      acct.appendChild(row('Reset someone else', 'Owners can set a new password for any account in the organization.',
+        H.btn('Open administration', '', function () { root.App.go('admin', { tab: 'accounts' }); })));
+    }
+    f.appendChild(U.panel('Account', null, acct, true));
+
     /* --- data --- */
     f.appendChild(H.section('Data'));
     var data = el('<div class="set-list"></div>');
@@ -7341,8 +7432,15 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
     { v: 'projects', l: 'Projects', i: 'projects', n: function () { return C.PROJECTS.length; } },
     { v: 'employees', l: 'People', i: 'employees', n: function () { return C.EMPLOYEES.length; } },
     { v: 'licences', l: 'Licences', i: 'licence', n: function () { return C.LICENCES.length; } },
-    { v: 'backup', l: 'Backup & restore', i: 'archive', n: null }
+    { v: 'backup', l: 'Backup & restore', i: 'archive', n: null },
+    /* Owner only. The server enforces this too - hiding a tab is not a
+       permission, and api/mutate.js assumes it is called directly. */
+    { v: 'accounts', l: 'Accounts', i: 'employees', n: null,
+      when: function () { return root.AUTH && root.AUTH.role() === 'owner'; } }
   ];
+  function visibleTabs() {
+    return TABS.filter(function (t) { return !t.when || t.when(); });
+  }
   var TYPES = ['Fixed project', 'Retainer', 'Time & materials', 'Milestone'];
   var DISC = [
     { v: 'eng', l: 'Build / configuration' }, { v: 'data', l: 'Data 360' },
@@ -7581,7 +7679,7 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
      register, so the section header doubles as a summary.                    */
   function tabBar(a) {
     var bar = el('<div class="tabbar" role="tablist" aria-label="Administration sections"></div>');
-    var btns = TABS.map(function (t) {
+    var btns = visibleTabs().map(function (t) {
       var on = a.tab === t.v;
       var b = el('<button type="button" role="tab" aria-selected="' + on + '" tabindex="' + (on ? 0 : -1) + '">' +
         U.icon(t.i) + '<span>' + esc(t.l) + '</span>' +
@@ -7615,6 +7713,7 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
     else if (a.tab === 'projects') f.appendChild(projectsPane(m));
     else if (a.tab === 'employees') f.appendChild(peoplePane(m));
     else if (a.tab === 'licences') f.appendChild(root.App.licencePane ? root.App.licencePane(m) : el('<div class="empty">Licences are unavailable.</div>'));
+    else if (a.tab === 'accounts') f.appendChild(accountsPane());
     else f.appendChild(backupPane());
     return f;
   };
@@ -7840,6 +7939,67 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
     }, 'trash');
     root.App.openDialog('Clear all data', body, [go], 'Start from an empty company');
   }
+  /* ---------- accounts ------------------------------------------------------ */
+  function accountsPane() {
+    var wrap = el('<div class="stack"></div>');
+    var me = root.AUTH && root.AUTH.user ? root.AUTH.user() : null;
+    var others = C.USERS.filter(function (u) { return !me || u.email !== me.email; });
+
+    var list = el('<div class="set-list"></div>');
+    C.USERS.forEach(function (u) {
+      var mine = me && u.email === me.email;
+      list.appendChild(rowOf(u.name || u.email,
+        esc(u.email) + ' &middot; ' + esc(u.role) + (mine ? ' &middot; this is you' : '') +
+        (u.active === false ? ' &middot; <span class="tag">inactive</span>' : ''),
+        el('<span class="tag">' + esc(u.role) + '</span>')));
+    });
+    wrap.appendChild(U.panel('Accounts', C.USERS.length + ' sign-in' + (C.USERS.length === 1 ? '' : 's') +
+      ' in this organization', list, true));
+
+    var put = el('<div style="display:flex;flex-direction:column;gap:12px"></div>');
+    put.appendChild(el('<div class="callout" style="border-left-color:var(--warn-line)">' +
+      '<strong>A reset signs that person out everywhere.</strong> Every session they have open ends ' +
+      'immediately, which is the point if the password leaked. They will need the new password to get ' +
+      'back in, so tell them what it is.</div>'));
+
+    if (!others.length) {
+      put.appendChild(el('<div class="empty">There is no other account in this organization to reset.</div>'));
+      wrap.appendChild(U.panel('Reset a password', null, put, true));
+      return wrap;
+    }
+
+    var pick = U.field({ label: 'Account', type: 'select', required: true,
+      options: others.map(function (u) {
+        return { v: u.email, l: (u.name || u.email) + ' - ' + u.email + ' (' + u.role + ')' };
+      }) });
+    var pair = U.passwordPair('New password for this account');
+    var msg  = el('<div style="min-height:17px;font-size:12px"></div>');
+    var go   = H.btn('Reset this password', 'btn-primary', function () {
+      msg.textContent = ''; msg.className = '';
+      if (!pair.validate()) return;
+      go.disabled = true;
+      C.adminSetPassword(pick.value(), pair.value()).then(function (out) {
+        go.disabled = false;
+        if (out && out.ok) {
+          pair.clear();
+          msg.className = 'ok';
+          msg.textContent = 'Password reset for ' + pick.value() + '. Their sessions have ended.';
+          U.toast('Password reset', { kind: 'success', detail: pick.value() + ' must sign in again.' });
+        } else {
+          msg.className = 'err';
+          msg.textContent = (out && out.data && out.data.message) || 'That change could not be saved.';
+        }
+      });
+    });
+    put.appendChild(U.formGrid([pick].concat(pair.fields)));
+    put.appendChild(msg);
+    var bar = el('<div></div>'); bar.appendChild(go); put.appendChild(bar);
+    put.appendChild(el('<div class="fl-hint">To change your own password, use Settings - it keeps you ' +
+      'signed in and asks for your current one.</div>'));
+    wrap.appendChild(U.panel('Reset a password', 'Owner only', put, true));
+    return wrap;
+  }
+
   function rowOf(label, hint, control) {
     var r = el('<div class="set-row"><div class="set-lab"><strong>' + esc(label) + '</strong><span>' + hint + '</span></div></div>');
     r.appendChild(control);

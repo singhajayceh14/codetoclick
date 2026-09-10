@@ -258,6 +258,9 @@
      it so a backup can record which months were closed and a restore can put
      them back that way. */
   var PERIOD_STATUS = {};
+  /* Sign-in accounts for this organization, filled from /api/state. These are
+     logins, not the payroll register - EMPLOYEES is a different thing. */
+  var USERS = [];
 
   var PINNED_REVENUE = { '2026-09': { P01: 40000 } };
 
@@ -490,7 +493,9 @@
     if (SYNC.onBusy) SYNC.onBusy(SYNC.pending > 0);
   }
 
-  function sync(op, args) {
+  /* quiet: handle the failure at the call site instead of raising the global
+     error toast. A password form wants its message beside the field. */
+  function sync(op, args, quiet) {
     if (!SYNC.on) return Promise.resolve({ ok: true });
     busy(1);
     return fetch('/api/mutate', {
@@ -504,7 +509,7 @@
       busy(-1);
       if (!out.ok) {
         var msg = (out.data && out.data.message) || 'That change could not be saved.';
-        if (SYNC.onError) SYNC.onError(msg, out.status);
+        if (!quiet && SYNC.onError) SYNC.onError(msg, out.status);
       }
       return out;
     }).catch(function () {
@@ -530,6 +535,7 @@
       STORE[m].empCost = src.empCost || {};
       STORE[m].other   = src.other   || [];
     });
+    USERS.length = 0; (st.users || []).forEach(function (x) { USERS.push(x); });
     Object.keys(PERIOD_STATUS).forEach(function (k) { delete PERIOD_STATUS[k]; });
     (st.periods || []).forEach(function (p) {
       if (p && p.month) PERIOD_STATUS[p.month] = p.status === 'closed' ? 'closed' : 'open';
@@ -550,6 +556,17 @@
         return true;
       })
       .catch(function () { return false; });
+  }
+
+  /* Passwords. Unlike the figure mutations these are async on purpose: there is
+     no local state to update, and the caller needs to know whether it worked.
+     The server takes the caller from the session cookie - the browser never
+     says who it is. */
+  function setOwnPassword(current, next) {
+    return sync('setOwnPassword', { current: current, next: next }, true);
+  }
+  function adminSetPassword(email, next) {
+    return sync('adminSetPassword', { email: email, next: next }, true);
   }
 
   function persist() { }          /* the server is the record now */
@@ -1125,6 +1142,7 @@
     addProject: addProject, updateProject: updateProject, archiveProject: archiveProject, deleteProject: deleteProject,
     updateEmployee: updateEmployee, setEmployeeCtc: setEmployeeCtc, deleteEmployee: deleteEmployee,
     exportState: exportState, importState: importState, byId: byId,
+    USERS: USERS, setOwnPassword: setOwnPassword, adminSetPassword: adminSetPassword,
     loadFromServer: loadFromServer, syncState: SYNC
   };
 })(typeof window !== 'undefined' ? window : globalThis);

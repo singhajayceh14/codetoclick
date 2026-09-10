@@ -910,6 +910,27 @@
     input.addEventListener('input', function () { if (f.classList.contains('invalid')) f.clear(); });
     return f;
   }
+  /* A new password and its repeat, carrying the same minimum the database
+     enforces in assert_password_ok(). One place for the rule, so the message on
+     the screen and the one from PostgreSQL cannot drift apart. */
+  var PASSWORD_MIN = 10;
+  function passwordPair(labelNew, labelRepeat) {
+    var a = field({ label: labelNew || 'New password', type: 'password', required: true,
+                    hint: 'At least ' + PASSWORD_MIN + ' characters.' });
+    var b = field({ label: labelRepeat || 'Repeat new password', type: 'password', required: true });
+    return {
+      fields: [a, b],
+      value: function () { return a.value(); },
+      clear: function () { a.input.value = ''; b.input.value = ''; a.clear(); b.clear(); },
+      validate: function () {
+        a.clear(); b.clear();
+        if (a.value().length < PASSWORD_MIN) return a.fail('At least ' + PASSWORD_MIN + ' characters.');
+        if (a.value() !== b.value()) return b.fail('The two passwords do not match.');
+        return true;
+      }
+    };
+  }
+
   function formGrid(fields) {
     var g = el('<div class="form-grid"></div>');
     fields.forEach(function (x) { g.appendChild(x); });
@@ -1062,6 +1083,7 @@
     segbar: segbar, breakdown: breakdown, bullet: bullet, sparkline: sparkline,
     table: table, setDensity: setDensity, toast: toast, panel: panel,
     sumStrip: sumStrip, insightCard: insightCard, emptyState: emptyState, toolOnProjects: toolOnProjects,
-    icon: icon, hideTip: hideTip, field: field, formGrid: formGrid, formSection: formSection, readout: readout, kpi: kpi, metric: metric, hero: hero, tile: tile
+    icon: icon, hideTip: hideTip, field: field, passwordPair: passwordPair,
+    PASSWORD_MIN: PASSWORD_MIN, formGrid: formGrid, formSection: formSection, readout: readout, kpi: kpi, metric: metric, hero: hero, tile: tile
   };
 })(typeof window !== 'undefined' ? window : globalThis);

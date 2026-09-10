@@ -394,3 +394,92 @@ begin
     end if;
   end loop;
 end $$;
+
+-- ---------------------------------------------------------------------------
+-- Passwords
+-- ---------------------------------------------------------------------------
+--
+-- set_password() above takes a bare email and reaches any user in the database.
+-- That is right for a hand-run SQL statement and wrong for anything the API can
+-- call, because memberships are what scope a user to an organization. These two
+-- operations are the API's way in, and both are scoped.
+
+-- One place for the rule, so the check and the message cannot drift apart.
+create or replace function assert_password_ok(p_new text) returns void
+language plpgsql
+set search_path = c2c, public
+as $$
+begin
+  if p_new is null or length(p_new) < 10 then
+    raise exception 'A password must be at least 10 characters.';
+  end if;
+end $$;
+
+-- Change your own. Knowing the current password is required: a stolen session
+-- should not be enough to take an account permanently.
+create or replace function op_set_own_password(p_org uuid, p_actor uuid, p_token text,
+                                               p_current text, p_new text)
+returns void language plpgsql
+set search_path = c2c, public
+as $$
+declare em citext;
+begin
+  perform assert_password_ok(p_new);
+
+  if not exists (select 1 from memberships where org_id = p_org and user_id = p_actor) then
+    raise exception 'That account is not in this organization.';
+  end if;
+
+  select email into em from users where id = p_actor;
+  if em is null then raise exception 'That account no longer exists.'; end if;
+
+  if not exists (select 1 from authenticate(em, p_current)) then
+    raise exception 'Your current password is not correct.';
+  end if;
+
+  update users set password_hash = crypt(p_new, gen_salt('bf', 12)) where id = p_actor;
+
+  -- Every other sign-in for this person ends now. The tab making the change
+  -- keeps its session, so changing your password does not sign you out.
+  update sessions set revoked_at = now()
+   where user_id = p_actor and revoked_at is null and token is distinct from p_token;
+end $$;
+
+-- Reset someone else's. Owner only - finance handles every figure but not
+-- identity, because taking over an owner account is not a finance operation.
+create or replace function op_admin_set_password(p_org uuid, p_actor uuid,
+                                                 p_email citext, p_new text)
+returns void language plpgsql
+set search_path = c2c, public
+as $$
+declare tgt uuid; actor_role text;
+begin
+  perform assert_password_ok(p_new);
+
+  select role into actor_role from memberships where org_id = p_org and user_id = p_actor;
+  if actor_role is distinct from 'owner' then
+    raise exception 'Only an owner can reset another account''s password.';
+  end if;
+
+  select u.id into tgt
+    from users u
+    join memberships m on m.user_id = u.id
+   where m.org_id = p_org and u.email = p_email;
+  if tgt is null then
+    raise exception 'There is no account % in this organization.', p_email;
+  end if;
+
+  if tgt = p_actor then
+    raise exception 'Use the change-my-password form for your own account, so you stay signed in.';
+  end if;
+
+  update users set password_hash = crypt(p_new, gen_salt('bf', 12)) where id = tgt;
+
+  -- A reset is usually the answer to a password that leaked, so everything
+  -- signed in as that person stops now - including whoever it is protecting
+  -- against. Leaving those sessions alive would make the reset cosmetic.
+  update sessions set revoked_at = now() where user_id = tgt and revoked_at is null;
+
+  -- Without this the lockout counter can keep them out with their new password.
+  delete from login_attempts where email = p_email;
+end $$;
