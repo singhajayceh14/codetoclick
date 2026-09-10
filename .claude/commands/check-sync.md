@@ -16,7 +16,7 @@ cd src && sh build.sh
 tr -d '\r' < app.html > /tmp/built.txt
 tr -d '\r' < ../public/index.html > /tmp/shipped.txt
 cmp /tmp/built.txt /tmp/shipped.txt && echo IN-SYNC || echo STALE
-rm -f app.html test-page.html /tmp/built.txt /tmp/shipped.txt
+rm -f app.html /tmp/built.txt /tmp/shipped.txt
 ```
 
 A raw `cmp` or `diff` without the `tr` will report a difference on an

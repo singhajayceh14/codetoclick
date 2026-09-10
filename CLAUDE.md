@@ -257,6 +257,11 @@ These cost real debugging time. Do not rediscover them.
   needs try/catch. (The app no longer uses it, but the pattern recurs.)
 - **`sh src/build.sh` is not the build.** It writes `src/app.html`; nothing
   reaches `public/index.html` until it is copied. Use `npm run build`.
+- **The document scaffolding in `build.sh` is load-bearing.** It wraps the
+  parts in a doctype, `lang`, charset and the viewport meta. The app shipped
+  without any of them for a long time, which meant every browser rendered it
+  in quirks mode (`document.compatMode === 'BackCompat'`) and every phone
+  assumed a ~980px wide viewport. Do not simplify that block away.
 - **`core.autocrlf` is `true` here and the committed blob is LF.** A plain
   `diff` or `cmp` between a fresh build and `public/index.html` reports a
   difference on every line that is only line endings. Strip carriage returns
