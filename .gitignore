@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Vercel
+.vercel
+
+# Build byproducts. build.sh writes these into src/; the artefact that ships
+# is public/index.html, which IS committed on purpose - do not ignore it.
+src/app.html
+src/test-page.html
+
+# Secrets. DATABASE_URL belongs in Vercel's environment variables, never here.
+.env
+.env.*
+
+# Personal Claude Code settings. .claude/settings.json IS committed - it holds
+# the shared rules for this repo.
+.claude/settings.local.json
+
+# OS noise
+Thumbs.db
+.DS_Store
