@@ -13,7 +13,7 @@
   "scripts": {
     "db:status": "node scripts/migrate.mjs --status",
     "db:migrate": "node scripts/migrate.mjs",
-    "build": "sh src/build.sh && cp src/app.html public/index.html && rm -f src/app.html src/test-page.html"
+    "build": "cd src && sh build.sh && cp app.html ../public/index.html && rm -f app.html test-page.html"
   },
   "devDependencies": {
     "pg": "^8.13.1"

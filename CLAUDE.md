@@ -86,11 +86,19 @@ browsers. Keep it that way.
 
 ### Building
 
-`src/build.sh` concatenates the parts in a fixed order into `app.html`, then
-writes `test-page.html`. It is a `sh` script (does not run on Windows
-PowerShell). The built `public/index.html` is committed, so the user never
-needs to run it — but **if you edit a `src/part*` file you must rebuild and
-commit `public/index.html` too**, or the change does nothing.
+    npm run build
+
+That is the whole build. It runs `src/build.sh` from inside `src/` — which is
+the only place it works, because it `cat`s the parts by relative path — then
+copies the result over `public/index.html` and clears the intermediates.
+
+**Do not run `sh src/build.sh` on its own.** It writes `src/app.html` and stops;
+the copy is a separate step, and skipping it means the change does nothing while
+appearing to have worked.
+
+It is a `sh` script, so use Git Bash rather than PowerShell. The built
+`public/index.html` is committed, so nobody else needs to run it — but **if you
+edit a `src/part*` file you must rebuild and commit `public/index.html` too**.
 
 Part order matters: `part2_data.js` (engine) defines `window.CTC` before
 everything else uses it; `part16_auth.js` is last and mounts the gate.
@@ -247,6 +255,22 @@ These cost real debugging time. Do not rediscover them.
   Adding `DATABASE_URL` then wondering why it is missing means: redeploy.
 - **localStorage throws** in some embedded contexts. Any browser-storage access
   needs try/catch. (The app no longer uses it, but the pattern recurs.)
+- **`sh src/build.sh` is not the build.** It writes `src/app.html`; nothing
+  reaches `public/index.html` until it is copied. Use `npm run build`.
+- **`core.autocrlf` is `true` here and the committed blob is LF.** A plain
+  `diff` or `cmp` between a fresh build and `public/index.html` reports a
+  difference on every line that is only line endings. Strip carriage returns
+  from both sides before comparing (`tr -d` then `cmp`), or you will conclude
+  the artefact is stale when it is not. Git normalises on commit, so real
+  rebuilds still produce clean diffs.
+- **Re-running `db/c2c_seed_users_v1.0.sql` resets every password.** It calls
+  `set_password()` on all four accounts unconditionally, putting them back to
+  the `ChangeMe!` starters. It is for an empty database only. `npm run
+  db:migrate` refuses to touch it, and the schema file, for this reason.
+- **A permission rule cannot protect `public/index.html`.** Denying a path in
+  `.claude/settings.json` blocks *any* write to it, the build's own copy
+  included — there is no rule that stops a hand-edit but allows the build. The
+  protection is this document and `npm run build`, not a config file.
 
 ---
 
@@ -267,20 +291,31 @@ These cost real debugging time. Do not rediscover them.
 
 Ordered by how much they matter for two users.
 
-1. **No concurrency control.** Two people editing the same month's revenue at
+1. **`CURRENT_MONTH` is hardcoded** at `src/part2_data.js:59`, and `MONTHS` is
+   built from `FIRST_MONTH` to it. The month list therefore *ends* there: the
+   app cannot accept a month past it until the line is edited and the app
+   rebuilt. For a product whose first rule is "the month is the record", this
+   is the gap that bites hardest, and it bites on a date rather than on use.
+   Note the demo-data generators at lines 221, 237 and 283 also read it, so
+   making it dynamic changes generated sample figures.
+2. **Employee CTC cannot be edited.** `op_add_employee` writes an
+   `employee_compensation` row; `op_update_employee` only touches name, title
+   and department. There is no operation that amends pay, so a raise cannot be
+   recorded. (`employee_compensation` *is* read — `lib/state.js` joins it to
+   fill `baseCtc` — so the table is wired up; what is missing is the write.)
+3. **No concurrency control.** Two people editing the same month's revenue at
    once: the second save wins silently. Deliberately not fixed — with two users
    it is not worth the complexity. Revisit if the team grows.
-2. **No password-change UI.** Done in SQL:
-   `select c2c.set_password('a@b.com','new')`. A settings screen would be a
-   reasonable next feature.
-3. **`employee_compensation` is written but not read** by the app; per-month
-   `employee_period_costs` is the truth. Either wire it up or drop it — right
-   now it is a half-used table.
-4. **No audit trail in practice.** `audit_log` exists and nothing writes to it.
-5. **`baseRev` and `health`** on projects are demo-era fields; they round-trip
+4. **Nothing purges `sessions` or `login_attempts`.** `purge_sessions()` and
+   `purge_login_attempts()` exist and no caller does. Both tables grow without
+   bound. A once-daily Vercel cron is enough, and once-daily is what the free
+   plan allows.
+5. **No audit trail in practice.** `audit_log` exists and nothing writes to it.
+6. **`baseRev` and `health`** on projects are demo-era fields; they round-trip
    as 0 / 0.5 and are inert. Remove them when convenient.
-6. **No backup automation.** The app has a JSON export in Manage Data; Neon's
-   free plan keeps limited history.
+7. **Backup is manual.** Administration → Backup & restore takes a JSON file and
+   restores it properly, database included — but nothing reminds anyone to take
+   one, and Neon's free plan has no point-in-time restore behind it.
 
 ---
 
