@@ -4,5 +4,10 @@
   "private": true,
   "type": "module",
   "description": "Code to Click - Profitability Intelligence",
-  "engines": { "node": ">=20" }
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^1.1.0"
+  }
 }
