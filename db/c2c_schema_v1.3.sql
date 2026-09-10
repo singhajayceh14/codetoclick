@@ -1,6 +1,6 @@
 -- ============================================================================
 -- Code to Click — Profitability Intelligence
--- PostgreSQL schema, version 1.0
+-- PostgreSQL schema, version 1.3
 --
 -- The whole model rests on one rule: THE MONTH IS THE RECORD. Registers
 -- (clients, projects, people, licences) describe things that exist over time;
@@ -133,6 +133,47 @@ as $$
      and u.password_hash = crypt(p_password, u.password_hash);
 $$;
 
+-- ---------------------------------------------------------------------------
+-- Brute force guard
+--
+-- A public sign-in page with no throttle can be guessed at indefinitely.
+-- bcrypt makes each attempt slow, but slow is not the same as bounded, so
+-- attempts are recorded and an email is locked out after too many failures in
+-- a short window. Successful sign-ins clear the count.
+-- ---------------------------------------------------------------------------
+
+create table login_attempts (
+  id        bigserial primary key,
+  email     citext      not null,
+  ip        inet,
+  succeeded boolean     not null,
+  at        timestamptz not null default now()
+);
+create index on login_attempts (email, at desc);
+
+-- How many failures in the window, and therefore whether to refuse outright.
+create or replace function login_blocked(p_email citext)
+returns boolean language sql
+set search_path = c2c, public
+as $$
+  select count(*) >= 10
+    from login_attempts
+   where email = p_email
+     and not succeeded
+     and at > now() - interval '15 minutes';
+$$;
+
+create or replace function purge_login_attempts() returns integer
+language sql
+set search_path = c2c, public
+as $$
+  with gone as (delete from login_attempts where at < now() - interval '30 days' returning 1)
+  select count(*)::int from gone;
+$$;
+
+comment on table login_attempts is
+  'Sign-in attempts, used to lock an email out after repeated failures. Never stores the password tried.';
+
 -- Sign in: verify, then open a session. Returns the token, or nothing.
 create or replace function login(p_email citext, p_password text, p_agent text default null, p_ip inet default null)
 returns table (token text, user_id uuid, email citext, full_name text, org_id uuid, role text)
@@ -141,8 +182,25 @@ set search_path = c2c, public
 as $$
 declare a record; t text;
 begin
+  -- Too many recent failures: refuse without even checking the password, so a
+  -- locked-out attacker learns nothing and costs us no bcrypt work.
+  if login_blocked(p_email) then
+    insert into login_attempts (email, ip, succeeded) values (p_email, p_ip, false);
+    return;
+  end if;
+
   select * into a from authenticate(p_email, p_password);
-  if not found then return; end if;
+
+  if not found then
+    insert into login_attempts (email, ip, succeeded) values (p_email, p_ip, false);
+    return;
+  end if;
+
+  insert into login_attempts (email, ip, succeeded) values (p_email, p_ip, true);
+  -- A good password clears the slate, so one fat-fingered morning does not
+  -- lock someone out for the rest of the window.
+  delete from login_attempts la
+   where la.email = p_email and not la.succeeded and la.at > now() - interval '15 minutes';
 
   insert into sessions (user_id, user_agent, ip) values (a.user_id, p_agent, p_ip)
   returning sessions.token into t;
@@ -212,12 +270,16 @@ create table periods (
 create table clients (
   id           uuid primary key default gen_random_uuid(),
   org_id       uuid not null references organizations(id) on delete cascade,
+  -- The short id the app itself uses (C01, P07, E12), so the browser and the
+  -- database name the same record without a translation layer in between.
+  code         text not null,
   name         text not null,
   industry     text,
   client_since period_month,
   archived_at  timestamptz,
   created_at   timestamptz not null default now(),
   unique (org_id, id),                      -- lets children key on (org_id, client_id)
+  unique (org_id, code),
   unique (org_id, name)
 );
 
@@ -228,6 +290,7 @@ create table clients (
 create table projects (
   id              uuid primary key default gen_random_uuid(),
   org_id          uuid not null references organizations(id) on delete cascade,
+  code            text not null,
   client_id       uuid not null,
   name            text not null,
   engagement_type text not null default 'fixed_project'
@@ -241,13 +304,15 @@ create table projects (
   foreign key (org_id, client_id) references clients (org_id, id) on delete restrict,
   unique (org_id, id),
   unique (org_id, client_id, name),
-  constraint project_dates_ordered check (ends_on is null or ends_on >= starts_on)
+  constraint project_dates_ordered check (ends_on is null or ends_on >= starts_on),
+  unique (org_id, code)
 );
 
 -- employees: a person on payroll.
 create table employees (
   id         uuid primary key default gen_random_uuid(),
   org_id     uuid not null references organizations(id) on delete cascade,
+  code       text not null,
   full_name  text not null,
   job_title  text,
   department text,
@@ -256,7 +321,8 @@ create table employees (
   left_on    period_month,                     -- null = still employed
   created_at timestamptz not null default now(),
   unique (org_id, id),
-  constraint employee_dates_ordered check (left_on is null or left_on >= joined_on)
+  constraint employee_dates_ordered check (left_on is null or left_on >= joined_on),
+  unique (org_id, code)
 );
 
 -- employee_compensation: the salary register, one row per change.
@@ -294,6 +360,7 @@ create table cost_categories (
 create table software_licences (
   id             uuid primary key default gen_random_uuid(),
   org_id         uuid not null references organizations(id) on delete cascade,
+  code           text not null,
   name           text not null,
   vendor         text,
   total_price    money_amount not null check (total_price >= 0),
@@ -303,7 +370,8 @@ create table software_licences (
   created_at     timestamptz  not null default now(),
   -- kept at high precision: 12 x monthly_charge must add back to total_price
   monthly_charge money_derived generated always as (total_price / term_months) stored,
-  unique (org_id, id)
+  unique (org_id, id),
+  unique (org_id, code)
 );
 
 -- ---------------------------------------------------------------------------

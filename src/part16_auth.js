@@ -1,50 +1,33 @@
 /* =============================================================================
-   Sign in / sign out — UI ONLY.
+   Sign in / sign out.
 
-   There is no backend yet. This gate decides what the browser shows, not what
-   the browser is allowed to have. Anyone can bypass it from the console. It
-   exists so the shell, the signed-out state and the sign-out path are real and
-   in place; step 3 replaces checkLocally() with a call to /api/login and the
-   screen itself does not change.
+   The password is checked by PostgreSQL, not here. This file only collects it,
+   posts it to /api/login, and renders whatever the server says. The session
+   lives in an httpOnly cookie the page cannot read, so nothing on this page —
+   including anything injected into it — can copy a session out.
 
-   Accounts below mirror the four rows seeded by c2c_seed_users_v1.0.sql, so the
-   emails and roles you see here are the ones the database will hand back.
+   On load the page asks /api/me rather than trusting anything stored locally:
+   the server decides who is signed in, every time.
 ============================================================================= */
 (function (root) {
   'use strict';
   var U = root.UI, el = U.el, esc = U.esc;
 
-  /* Same four accounts as the database seed. Passwords live here only because
-     nothing can verify them yet — the moment /api/login exists, they go. */
-  var ACCOUNTS = [
-    { email: 'owner@codetoclick.ai',   name: 'Akhil Kaushal',    role: 'owner',   pw: 'ChangeMe!Owner1',   can: 'Everything, including closing and reopening months' },
-    { email: 'finance@codetoclick.ai', name: 'Finance Lead',     role: 'finance', pw: 'ChangeMe!Finance1', can: 'Enter and amend any figure, close months' },
-    { email: 'manager@codetoclick.ai', name: 'Delivery Manager', role: 'manager', pw: 'ChangeMe!Manager1', can: 'Allocate people, enter revenue and cost' },
-    { email: 'viewer@codetoclick.ai',  name: 'Read Only',        role: 'viewer',  pw: 'ChangeMe!Viewer1',  can: 'Read only' }
-  ];
+  var session = null;      /* whatever /api/me last told us, or null */
+  var ready = false;       /* have we heard back yet? */
 
-  var KEY = 'ctc.session';
-
-  /* localStorage throws in some embedded contexts, so every touch is guarded. */
-  function store() { try { return root.localStorage || null; } catch (e) { return null; } }
-  function read() {
-    var s = store(); if (!s) return null;
-    try { var raw = s.getItem(KEY); return raw ? JSON.parse(raw) : null; } catch (e) { return null; }
-  }
-  function write(v) {
-    var s = store(); if (!s) return;
-    try { v ? s.setItem(KEY, JSON.stringify(v)) : s.removeItem(KEY); } catch (e) { }
+  function api(path, opts) {
+    return fetch(path, Object.assign({
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin'        /* send the session cookie */
+    }, opts || {}));
   }
 
-  var session = read();
-
-  function checkLocally(email, pw) {
-    var e = String(email || '').trim().toLowerCase();
-    for (var i = 0; i < ACCOUNTS.length; i++) {
-      var a = ACCOUNTS[i];
-      if (a.email === e && a.pw === pw) return { email: a.email, name: a.name, role: a.role };
-    }
-    return null;          /* one answer for wrong password and unknown email */
+  function whoAmI() {
+    return api('/api/me')
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) { return d && d.user ? d.user : null; })
+      .catch(function () { return null; });   /* offline or no API: signed out */
   }
 
   function initials(name) {
@@ -138,35 +121,31 @@
       if (!email.value.trim()) { fail('Enter your email address.'); email.focus(); return; }
       if (!pw.value) { fail('Enter your password.'); return; }
 
-      /* A short wait so the pending state is real rather than theatre — the
-         API call that replaces this will take about this long. */
       btn.disabled = true;
       btn.innerHTML = '<span class="si-spin" aria-hidden="true"></span>Signing in…';
-      var attempt = { email: email.value, pw: pw.value };
-      root.setTimeout(function () {
-        var who = checkLocally(attempt.email, attempt.pw);
-        btn.disabled = false;
-        btn.textContent = 'Sign in';
-        if (!who) { fail('That email and password do not match an account.'); return; }
-        AUTH.signIn(who);
-      }, 320);
-    });
 
-    /* --- demo accounts: DELETE before this app holds real data ----------- */
-    var demo = el('<details class="si-demo"><summary>' +
-      '<svg class="ico" viewBox="0 0 24 24"><use href="#i-chevron"></use></svg>Demo accounts</summary></details>');
-    var accs = el('<div class="si-accs"></div>');
-    ACCOUNTS.forEach(function (a) {
-      var b = el('<button type="button" class="si-acc" title="' + esc(a.can) + '">' +
-        '<b>' + esc(a.name) + '</b><span>' + esc(a.email) + '</span>' +
-        '<span class="rl">' + esc(a.role) + '</span></button>');
-      b.addEventListener('click', function () {
-        email.value = a.email; pw.value = a.pw; clearErr(); pw.focus();
+      api('/api/login', {
+        method: 'POST',
+        body: JSON.stringify({ email: email.value.trim(), password: pw.value })
+      }).then(function (r) {
+        return r.json().then(function (d) { return { ok: r.ok, data: d }; });
+      }).then(function (out) {
+        btn.disabled = false; btn.textContent = 'Sign in';
+        if (!out.ok || !out.data.user) {
+          fail((out.data && out.data.message) || 'That email and password do not match an account.');
+          return;
+        }
+        session = out.data.user;
+        AUTH.loadData().then(function () {
+          apply();
+          if (root.App && root.App.render) root.App.render();
+          if (U.toast) U.toast('Signed in as ' + session.name);
+        });
+      }).catch(function () {
+        btn.disabled = false; btn.textContent = 'Sign in';
+        fail('Could not reach the server. Check your connection and try again.');
       });
-      accs.appendChild(b);
     });
-    demo.appendChild(accs);
-    card.appendChild(demo);
 
     panel.appendChild(card);
     wrap.appendChild(panel);
@@ -227,6 +206,7 @@
   function apply() {
     var app = document.querySelector('.app');
     ensure();
+    if (!ready) { gate.hidden = true; if (app) app.hidden = true; return; }
     if (session) {
       gate.hidden = true;
       if (app) app.hidden = false;
@@ -245,34 +225,66 @@
   }
 
   var AUTH = {
-    /* Who is signed in, or null. */
+    /* Who is signed in, or null. Display only — the server decides access. */
     user: function () { return session; },
     role: function () { return session ? session.role : null; },
 
-    signIn: function (who) {
-      session = who;
-      write(session);
-      apply();
-      if (root.App && root.App.render) root.App.render();
-      if (U.toast) U.toast('Signed in as ' + who.name);
+    signOut: function () {
+      api('/api/logout', { method: 'POST' })
+        .catch(function () { })            /* revoke server-side, best effort */
+        .then(function () {
+          session = null;
+          if (root.CTC && root.CTC.clearAll) { root.CTC.syncState.on = false; root.CTC.clearAll(); }
+          apply();
+        });
+    },
+
+    /* Ask the server who we are, then show the app or the gate. */
+    refresh: function () {
+      return whoAmI().then(function (u) {
+        session = u;
+        if (!u) { ready = true; apply(); return null; }
+        return AUTH.loadData().then(function () {
+          ready = true; apply();
+          if (root.App && root.App.render) root.App.render();
+          return u;
+        });
+      });
+    },
+
+    /* Pull this organization's records from the database into the working copy. */
+    loadData: function () {
+      var C = root.CTC;
+      if (!C || !C.loadFromServer) return Promise.resolve(false);
+      return C.loadFromServer();
+    },
+
+    /* Test-harness entry: the suites run from a file:// page with no API, so
+       they set the display state directly. Grants nothing — every endpoint
+       checks the cookie server-side regardless of what this says. */
+    devSignIn: function (who) {
+      session = who || { email: 'owner@codetoclick.ai', name: 'Akhil Kaushal', role: 'owner' };
+      ready = true; apply();
       return true;
     },
 
-    signOut: function () {
-      session = null;
-      write(null);
-      apply();
-    },
+    mount: function () {
+      mountMenu();
+      apply();            /* nothing visible while we ask */
 
-    /* Used by the test harnesses so they enter through the front door
-       rather than around it. Grants nothing a console could not already do. */
-    devSignIn: function (email) {
-      var a = ACCOUNTS.filter(function (x) { return x.email === (email || ACCOUNTS[0].email); })[0] || ACCOUNTS[0];
-      return AUTH.signIn({ email: a.email, name: a.name, role: a.role });
-    },
-
-    accounts: ACCOUNTS,
-    mount: function () { mountMenu(); apply(); }
+      /* A refused write must never leave the screen disagreeing with the
+         database: say what happened, then reload from the server. */
+      if (root.CTC && root.CTC.syncState) {
+        root.CTC.syncState.onError = function (msg, status) {
+          if (status === 401) { session = null; apply(); return; }
+          if (U.toast) U.toast(msg, { kind: 'error' });
+          AUTH.loadData().then(function () {
+            if (root.App && root.App.render) root.App.render();
+          });
+        };
+      }
+      AUTH.refresh();
+    }
   };
 
   root.AUTH = AUTH;

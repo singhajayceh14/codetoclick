@@ -1792,7 +1792,7 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
   // the reporting calendar can start in any month; quarters, year-to-date and
   // full-year all pivot on it
   var FISCAL_START = 1;
-  function setFiscalStart(m) { FISCAL_START = Math.min(12, Math.max(1, m | 0)); }
+  function setFiscalStart(m) { FISCAL_START = Math.min(12, Math.max(1, m | 0)); sync('setFiscalStart', { month: FISCAL_START }); }
   function getFiscalStart() { return FISCAL_START; }
   function fiscalOffset(k) { return (mparse(k).m - FISCAL_START + 12) % 12; }
   function mquarter(k) { return Math.floor(fiscalOffset(k) / 3) + 1; }
@@ -2224,24 +2224,79 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
   var cache = {};
   function invalidate(month) { if (month) delete cache[month]; else cache = {}; persist(); }
 
-  /* Browser storage can be absent, sandboxed or full; every touch is guarded
-     so the product keeps working in memory when it cannot be saved. */
-  function store() { try { return root.localStorage || null; } catch (e) { return null; } }
-  var persistTimer = null, persistOn = true;
-  function persist() {
-    if (!persistOn) return;
-    clearTimeout(persistTimer);
-    persistTimer = setTimeout(function () {
-      var st = store(); if (!st) return;
-      try { st.setItem(STORAGE_KEY, JSON.stringify(exportState())); }
-      catch (e) { /* private mode or quota: the session still works, it just will not survive a reload */ }
-    }, 150);
+  /* ---------- server sync -------------------------------------------------
+     The database is the record. The browser keeps a working copy so the UI
+     stays instant, sends every change to /api/mutate, and reloads from the
+     server if a change is refused - so a rejected write can never leave the
+     screen showing something the database does not agree with.             */
+  var SYNC = { on: false, pending: 0, onError: null, onBusy: null };
+
+  function busy(delta) {
+    SYNC.pending += delta;
+    if (SYNC.onBusy) SYNC.onBusy(SYNC.pending > 0);
   }
-  function persistedAt() {
-    var st = store(); if (!st) return null;
-    try { var raw = st.getItem(STORAGE_KEY); if (!raw) return null; return JSON.parse(raw).exportedAt || null; } catch (e) { return null; }
+
+  function sync(op, args) {
+    if (!SYNC.on) return Promise.resolve({ ok: true });
+    busy(1);
+    return fetch('/api/mutate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ op: op, args: args })
+    }).then(function (r) {
+      return r.json().then(function (d) { return { ok: r.ok, status: r.status, data: d }; });
+    }).then(function (out) {
+      busy(-1);
+      if (!out.ok) {
+        var msg = (out.data && out.data.message) || 'That change could not be saved.';
+        if (SYNC.onError) SYNC.onError(msg, out.status);
+      }
+      return out;
+    }).catch(function () {
+      busy(-1);
+      if (SYNC.onError) SYNC.onError('Could not reach the server. Your change was not saved.', 0);
+      return { ok: false };
+    });
   }
-  function forgetPersisted() { var st = store(); if (!st) return; try { st.removeItem(STORAGE_KEY); } catch (e) { } }
+
+  /* Replace the whole working copy with what the server holds. */
+  function applyServerState(st) {
+    CLIENTS.length = 0;   (st.clients   || []).forEach(function (x) { CLIENTS.push(x); });
+    PROJECTS.length = 0;  (st.projects  || []).forEach(function (x) { PROJECTS.push(x); });
+    EMPLOYEES.length = 0; (st.employees || []).forEach(function (x) { EMPLOYEES.push(x); });
+    LICENCES.length = 0;  (st.licences  || []).forEach(function (x) { LICENCES.push(x); });
+    Object.keys(STORE).forEach(function (k) { delete STORE[k]; });
+    MONTHS.forEach(function (m) { STORE[m] = emptyMonth(m); });
+    Object.keys(st.ledger || {}).forEach(function (m) {
+      var src = st.ledger[m];
+      if (!STORE[m]) STORE[m] = emptyMonth(m);
+      STORE[m].revenue = src.revenue || {};
+      STORE[m].alloc   = src.alloc   || {};
+      STORE[m].empCost = src.empCost || {};
+      STORE[m].other   = src.other   || [];
+    });
+    if (st.org && st.org.fiscalStart) FISCAL_START = st.org.fiscalStart;
+    DATA_MODE = 'own';
+    cache = {};
+  }
+
+  function loadFromServer() {
+    return fetch('/api/state', { credentials: 'same-origin' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d || !d.state) return false;
+        SYNC.on = false;
+        applyServerState(d.state);
+        SYNC.on = true;
+        return true;
+      })
+      .catch(function () { return false; });
+  }
+
+  function persist() { }          /* the server is the record now */
+  function persistedAt() { return null; }
+  function forgetPersisted() { }
 
   function rollup(month) {
     if (cache[month]) return cache[month];
@@ -2490,14 +2545,17 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
 
   /* ---------- mutation (prototype data entry) ------------------------------- */
   function setRevenue(month, projectId, amount) {
+    sync('setRevenue', { month: month, projectId: projectId, amount: +amount || 0 });
     snapshot(month).revenue[projectId] = Math.max(0, Math.round(amount));
     invalidate(month);
   }
   function addCost(month, projectId, category, amount) {
+    sync('addCost', { month: month, projectId: projectId, category: category, amount: +amount || 0 });
     snapshot(month).other.push({ projectId: projectId || null, category: category, amount: Math.round(amount) });
     invalidate(month);
   }
   function setAllocation(month, empId, map) {
+    sync('setAllocation', { month: month, employeeId: empId, map: map });
     var total = Object.keys(map).reduce(function (t, k) { return t + (map[k] || 0); }, 0);
     if (total > 100) return { ok: false, error: 'Allocation totals ' + total + '%. Reduce it to 100% or less before saving.' };
     var clean = {};
@@ -2508,7 +2566,10 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
   }
   // whole-month allocation snapshot — used for undo and for carrying a month forward
   function getAllocations(month) { return JSON.parse(JSON.stringify(snapshot(month).alloc)); }
-  function setAllocations(month, alloc) { snapshot(month).alloc = alloc; invalidate(month); }
+  function setAllocations(month, alloc) {
+    snapshot(month).alloc = alloc; invalidate(month);
+    Object.keys(alloc).forEach(function (eid) { sync('setAllocation', { month: month, employeeId: eid, map: alloc[eid] }); });
+  }
   function copyAllocations(from, to) {
     var src = snapshot(from).alloc, dst = {}, copied = 0, dropped = 0, skipped = 0;
     EMPLOYEES.forEach(function (e) {
@@ -2544,6 +2605,14 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
       if (mindex(m) >= mindex(rec.join)) { snapshot(m).empCost[id] = rec.ctc / 12; snapshot(m).alloc[id] = {}; }
     });
     invalidate();
+    sync('addEmployee', { id: id, name: rec.name, title: rec.title, dept: rec.dept,
+                          ctc: rec.ctc, join: rec.join, disc: rec.disc || 'eng' })
+      .then(function (r) {
+        if (!r || !r.ok) return;
+        MONTHS.forEach(function (m) {
+          if (mindex(m) >= mindex(rec.join)) sync('setEmpCost', { month: m, employeeId: id, monthly: rec.ctc / 12 });
+        });
+      });
     return id;
   }
 
@@ -2562,21 +2631,23 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
 
   function addClient(rec) {
     var id = nextId(CLIENTS, 'C', 2);
-    CLIENTS.push({ id: id, name: rec.name, industry: rec.industry || 'Professional services', since: rec.since || CURRENT_MONTH });
+    var row = { id: id, name: rec.name, industry: rec.industry || 'Professional services', since: rec.since || CURRENT_MONTH };
+    CLIENTS.push(row);
     invalidate();
+    sync('addClient', row);
     return id;
   }
   function updateClient(id, patch) {
     var c = byId(CLIENTS, id); if (!c) return false;
     ['name', 'industry', 'since'].forEach(function (k) { if (patch[k] != null) c[k] = patch[k]; });
-    invalidate(); return true;
+    invalidate(); sync('updateClient', { id: id, patch: patch }); return true;
   }
   function clientProjects(id) { return PROJECTS.filter(function (p) { return p.clientId === id; }); }
   function deleteClient(id) {
     clientProjects(id).forEach(function (p) { deleteProject(p.id); });
     var i = CLIENTS.indexOf(byId(CLIENTS, id));
     if (i === -1) return false;
-    CLIENTS.splice(i, 1); invalidate(); return true;
+    CLIENTS.splice(i, 1); invalidate(); sync('deleteClient', { id: id }); return true;
   }
 
   function addProject(rec) {
@@ -2588,14 +2659,22 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
       end: rec.end || null, disc: rec.disc || 'eng'
     });
     // seed the revenue the operator entered into the months the project runs
+    var seeded = [];
     if (+rec.revenue && rec.billable !== false) {
       MONTHS.forEach(function (m) {
         if (mindex(m) >= mindex(rec.start || CURRENT_MONTH) && (!rec.end || mindex(m) <= mindex(rec.end))) {
-          snapshot(m).revenue[id] = +rec.revenue;
+          snapshot(m).revenue[id] = +rec.revenue; seeded.push(m);
         }
       });
     }
     invalidate();
+    sync('addProject', { id: id, clientId: rec.clientId, name: rec.name, type: rec.type || 'Fixed project',
+                         billable: rec.billable !== false, disc: rec.disc || 'eng',
+                         start: rec.start || CURRENT_MONTH, end: rec.end || null })
+      .then(function (r) {
+        if (!r || !r.ok) return;
+        seeded.forEach(function (m) { sync('setRevenue', { month: m, projectId: id, amount: +rec.revenue }); });
+      });
     return id;
   }
   function updateProject(id, patch) {
@@ -2603,11 +2682,11 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
     ['name', 'type', 'clientId', 'start', 'end', 'disc', 'billable'].forEach(function (k) {
       if (patch[k] !== undefined) p[k] = patch[k];
     });
-    invalidate(); return true;
+    invalidate(); sync('updateProject', { id: id, patch: patch }); return true;
   }
   function archiveProject(id, endMonth) {
     var p = byId(PROJECTS, id); if (!p) return false;
-    p.end = endMonth; invalidate(); return true;
+    p.end = endMonth; invalidate(); sync('updateProject', { id: id, patch: { end: endMonth } }); return true;
   }
   function deleteProject(id) {
     var p = byId(PROJECTS, id); if (!p) return false;
@@ -2619,13 +2698,13 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
     });
     /* a project's own licences go with it; company-wide ones are untouched */
     PROJECTS.splice(PROJECTS.indexOf(p), 1);
-    invalidate(); return true;
+    invalidate(); sync('deleteProject', { id: id }); return true;
   }
 
   function updateEmployee(id, patch) {
     var e = byId(EMPLOYEES, id); if (!e) return false;
     ['name', 'title', 'dept', 'disc', 'join'].forEach(function (k) { if (patch[k] != null) e[k] = patch[k]; });
-    invalidate(); return true;
+    invalidate(); sync('updateEmployee', { id: id, patch: patch }); return true;
   }
   // a pay change takes effect from a month forward; earlier months are untouched
   function setEmployeeCtc(id, ctc, fromMonth) {
@@ -2636,7 +2715,12 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
       snapshot(m).empCost[id] = ctc / 12;
     });
     e.baseCtc = ctc;
-    invalidate(); return true;
+    invalidate();
+    MONTHS.forEach(function (m) {
+      if (mindex(m) < mindex(fromMonth) || mindex(m) < mindex(e.join)) return;
+      sync('setEmpCost', { month: m, employeeId: id, monthly: ctc / 12 });
+    });
+    return true;
   }
   function deleteEmployee(id) {
     var e = byId(EMPLOYEES, id); if (!e) return false;
@@ -2645,7 +2729,7 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
       delete snap.empCost[id]; delete snap.alloc[id];
     });
     EMPLOYEES.splice(EMPLOYEES.indexOf(e), 1);
-    invalidate(); return true;
+    invalidate(); sync('deleteEmployee', { id: id }); return true;
   }
 
   /* ---------- backup and restore ------------------------------------------ */
@@ -2674,20 +2758,21 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
   /* ---------- licence register: create, amend, delete ----------------------- */
   function addLicence(rec) {
     var id = nextId(LICENCES, 'L', 2);
-    LICENCES.push({ id: id, name: rec.name, vendor: rec.vendor || '', price: +rec.price || 0, start: rec.start,
-      months: Math.max(1, +rec.months || 1), note: rec.note || '' });
-    invalidate(); return id;
+    var row = { id: id, name: rec.name, vendor: rec.vendor || '', price: +rec.price || 0, start: rec.start,
+      months: Math.max(1, +rec.months || 1), note: rec.note || '' };
+    LICENCES.push(row);
+    invalidate(); sync('addLicence', row); return id;
   }
   function updateLicence(id, rec) {
     var l = byId(LICENCES, id); if (!l) return false;
     ['name', 'vendor', 'note', 'start'].forEach(function (k) { if (rec[k] != null) l[k] = rec[k]; });
     if (rec.price != null) l.price = +rec.price || 0;
     if (rec.months != null) l.months = Math.max(1, +rec.months || 1);
-    invalidate(); return true;
+    invalidate(); sync('updateLicence', { id: id, patch: rec }); return true;
   }
   function deleteLicence(id) {
     var l = byId(LICENCES, id); if (!l) return false;
-    LICENCES.splice(LICENCES.indexOf(l), 1); invalidate(); return true;
+    LICENCES.splice(LICENCES.indexOf(l), 1); invalidate(); sync('deleteLicence', { id: id }); return true;
   }
 
   function exportState() {
@@ -2748,16 +2833,8 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
     invalidate();
   }
   /* boot: pick up whatever this browser saved last time */
-  (function boot() {
-    var st = store(), raw = null;
-    if (!st) return;
-    try { raw = st.getItem(STORAGE_KEY); } catch (e) { }
-    if (!raw) return;
-    persistOn = false;
-    try { var obj = JSON.parse(raw); var res = importState(obj); if (!res.ok) forgetPersisted(); }
-    catch (e) { forgetPersisted(); }
-    persistOn = true;
-  })();
+  /* No boot from browser storage any more. The app starts empty and the
+     signed-in session fills it from /api/state - see App.auth.mount(). */
 
   root.CTC = {
     dataMode: dataMode, clearAll: clearAll, restoreDemo: restoreDemo, persistedAt: persistedAt, forgetPersisted: forgetPersisted,
@@ -2777,7 +2854,8 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
     addClient: addClient, updateClient: updateClient, deleteClient: deleteClient, clientProjects: clientProjects,
     addProject: addProject, updateProject: updateProject, archiveProject: archiveProject, deleteProject: deleteProject,
     updateEmployee: updateEmployee, setEmployeeCtc: setEmployeeCtc, deleteEmployee: deleteEmployee,
-    exportState: exportState, importState: importState, byId: byId
+    exportState: exportState, importState: importState, byId: byId,
+    loadFromServer: loadFromServer, syncState: SYNC
   };
 })(typeof window !== 'undefined' ? window : globalThis);
 </script>
@@ -8581,52 +8659,35 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
 </script>
 <script>
 /* =============================================================================
-   Sign in / sign out — UI ONLY.
+   Sign in / sign out.
 
-   There is no backend yet. This gate decides what the browser shows, not what
-   the browser is allowed to have. Anyone can bypass it from the console. It
-   exists so the shell, the signed-out state and the sign-out path are real and
-   in place; step 3 replaces checkLocally() with a call to /api/login and the
-   screen itself does not change.
+   The password is checked by PostgreSQL, not here. This file only collects it,
+   posts it to /api/login, and renders whatever the server says. The session
+   lives in an httpOnly cookie the page cannot read, so nothing on this page —
+   including anything injected into it — can copy a session out.
 
-   Accounts below mirror the four rows seeded by c2c_seed_users_v1.0.sql, so the
-   emails and roles you see here are the ones the database will hand back.
+   On load the page asks /api/me rather than trusting anything stored locally:
+   the server decides who is signed in, every time.
 ============================================================================= */
 (function (root) {
   'use strict';
   var U = root.UI, el = U.el, esc = U.esc;
 
-  /* Same four accounts as the database seed. Passwords live here only because
-     nothing can verify them yet — the moment /api/login exists, they go. */
-  var ACCOUNTS = [
-    { email: 'owner@codetoclick.ai',   name: 'Akhil Kaushal',    role: 'owner',   pw: 'ChangeMe!Owner1',   can: 'Everything, including closing and reopening months' },
-    { email: 'finance@codetoclick.ai', name: 'Finance Lead',     role: 'finance', pw: 'ChangeMe!Finance1', can: 'Enter and amend any figure, close months' },
-    { email: 'manager@codetoclick.ai', name: 'Delivery Manager', role: 'manager', pw: 'ChangeMe!Manager1', can: 'Allocate people, enter revenue and cost' },
-    { email: 'viewer@codetoclick.ai',  name: 'Read Only',        role: 'viewer',  pw: 'ChangeMe!Viewer1',  can: 'Read only' }
-  ];
+  var session = null;      /* whatever /api/me last told us, or null */
+  var ready = false;       /* have we heard back yet? */
 
-  var KEY = 'ctc.session';
-
-  /* localStorage throws in some embedded contexts, so every touch is guarded. */
-  function store() { try { return root.localStorage || null; } catch (e) { return null; } }
-  function read() {
-    var s = store(); if (!s) return null;
-    try { var raw = s.getItem(KEY); return raw ? JSON.parse(raw) : null; } catch (e) { return null; }
-  }
-  function write(v) {
-    var s = store(); if (!s) return;
-    try { v ? s.setItem(KEY, JSON.stringify(v)) : s.removeItem(KEY); } catch (e) { }
+  function api(path, opts) {
+    return fetch(path, Object.assign({
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin'        /* send the session cookie */
+    }, opts || {}));
   }
 
-  var session = read();
-
-  function checkLocally(email, pw) {
-    var e = String(email || '').trim().toLowerCase();
-    for (var i = 0; i < ACCOUNTS.length; i++) {
-      var a = ACCOUNTS[i];
-      if (a.email === e && a.pw === pw) return { email: a.email, name: a.name, role: a.role };
-    }
-    return null;          /* one answer for wrong password and unknown email */
+  function whoAmI() {
+    return api('/api/me')
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) { return d && d.user ? d.user : null; })
+      .catch(function () { return null; });   /* offline or no API: signed out */
   }
 
   function initials(name) {
@@ -8720,35 +8781,31 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
       if (!email.value.trim()) { fail('Enter your email address.'); email.focus(); return; }
       if (!pw.value) { fail('Enter your password.'); return; }
 
-      /* A short wait so the pending state is real rather than theatre — the
-         API call that replaces this will take about this long. */
       btn.disabled = true;
       btn.innerHTML = '<span class="si-spin" aria-hidden="true"></span>Signing in…';
-      var attempt = { email: email.value, pw: pw.value };
-      root.setTimeout(function () {
-        var who = checkLocally(attempt.email, attempt.pw);
-        btn.disabled = false;
-        btn.textContent = 'Sign in';
-        if (!who) { fail('That email and password do not match an account.'); return; }
-        AUTH.signIn(who);
-      }, 320);
-    });
 
-    /* --- demo accounts: DELETE before this app holds real data ----------- */
-    var demo = el('<details class="si-demo"><summary>' +
-      '<svg class="ico" viewBox="0 0 24 24"><use href="#i-chevron"></use></svg>Demo accounts</summary></details>');
-    var accs = el('<div class="si-accs"></div>');
-    ACCOUNTS.forEach(function (a) {
-      var b = el('<button type="button" class="si-acc" title="' + esc(a.can) + '">' +
-        '<b>' + esc(a.name) + '</b><span>' + esc(a.email) + '</span>' +
-        '<span class="rl">' + esc(a.role) + '</span></button>');
-      b.addEventListener('click', function () {
-        email.value = a.email; pw.value = a.pw; clearErr(); pw.focus();
+      api('/api/login', {
+        method: 'POST',
+        body: JSON.stringify({ email: email.value.trim(), password: pw.value })
+      }).then(function (r) {
+        return r.json().then(function (d) { return { ok: r.ok, data: d }; });
+      }).then(function (out) {
+        btn.disabled = false; btn.textContent = 'Sign in';
+        if (!out.ok || !out.data.user) {
+          fail((out.data && out.data.message) || 'That email and password do not match an account.');
+          return;
+        }
+        session = out.data.user;
+        AUTH.loadData().then(function () {
+          apply();
+          if (root.App && root.App.render) root.App.render();
+          if (U.toast) U.toast('Signed in as ' + session.name);
+        });
+      }).catch(function () {
+        btn.disabled = false; btn.textContent = 'Sign in';
+        fail('Could not reach the server. Check your connection and try again.');
       });
-      accs.appendChild(b);
     });
-    demo.appendChild(accs);
-    card.appendChild(demo);
 
     panel.appendChild(card);
     wrap.appendChild(panel);
@@ -8809,6 +8866,7 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
   function apply() {
     var app = document.querySelector('.app');
     ensure();
+    if (!ready) { gate.hidden = true; if (app) app.hidden = true; return; }
     if (session) {
       gate.hidden = true;
       if (app) app.hidden = false;
@@ -8827,34 +8885,66 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
   }
 
   var AUTH = {
-    /* Who is signed in, or null. */
+    /* Who is signed in, or null. Display only — the server decides access. */
     user: function () { return session; },
     role: function () { return session ? session.role : null; },
 
-    signIn: function (who) {
-      session = who;
-      write(session);
-      apply();
-      if (root.App && root.App.render) root.App.render();
-      if (U.toast) U.toast('Signed in as ' + who.name);
+    signOut: function () {
+      api('/api/logout', { method: 'POST' })
+        .catch(function () { })            /* revoke server-side, best effort */
+        .then(function () {
+          session = null;
+          if (root.CTC && root.CTC.clearAll) { root.CTC.syncState.on = false; root.CTC.clearAll(); }
+          apply();
+        });
+    },
+
+    /* Ask the server who we are, then show the app or the gate. */
+    refresh: function () {
+      return whoAmI().then(function (u) {
+        session = u;
+        if (!u) { ready = true; apply(); return null; }
+        return AUTH.loadData().then(function () {
+          ready = true; apply();
+          if (root.App && root.App.render) root.App.render();
+          return u;
+        });
+      });
+    },
+
+    /* Pull this organization's records from the database into the working copy. */
+    loadData: function () {
+      var C = root.CTC;
+      if (!C || !C.loadFromServer) return Promise.resolve(false);
+      return C.loadFromServer();
+    },
+
+    /* Test-harness entry: the suites run from a file:// page with no API, so
+       they set the display state directly. Grants nothing — every endpoint
+       checks the cookie server-side regardless of what this says. */
+    devSignIn: function (who) {
+      session = who || { email: 'owner@codetoclick.ai', name: 'Akhil Kaushal', role: 'owner' };
+      ready = true; apply();
       return true;
     },
 
-    signOut: function () {
-      session = null;
-      write(null);
-      apply();
-    },
+    mount: function () {
+      mountMenu();
+      apply();            /* nothing visible while we ask */
 
-    /* Used by the test harnesses so they enter through the front door
-       rather than around it. Grants nothing a console could not already do. */
-    devSignIn: function (email) {
-      var a = ACCOUNTS.filter(function (x) { return x.email === (email || ACCOUNTS[0].email); })[0] || ACCOUNTS[0];
-      return AUTH.signIn({ email: a.email, name: a.name, role: a.role });
-    },
-
-    accounts: ACCOUNTS,
-    mount: function () { mountMenu(); apply(); }
+      /* A refused write must never leave the screen disagreeing with the
+         database: say what happened, then reload from the server. */
+      if (root.CTC && root.CTC.syncState) {
+        root.CTC.syncState.onError = function (msg, status) {
+          if (status === 401) { session = null; apply(); return; }
+          if (U.toast) U.toast(msg, { kind: 'error' });
+          AUTH.loadData().then(function () {
+            if (root.App && root.App.render) root.App.render();
+          });
+        };
+      }
+      AUTH.refresh();
+    }
   };
 
   root.AUTH = AUTH;

@@ -42,7 +42,7 @@
   // the reporting calendar can start in any month; quarters, year-to-date and
   // full-year all pivot on it
   var FISCAL_START = 1;
-  function setFiscalStart(m) { FISCAL_START = Math.min(12, Math.max(1, m | 0)); }
+  function setFiscalStart(m) { FISCAL_START = Math.min(12, Math.max(1, m | 0)); sync('setFiscalStart', { month: FISCAL_START }); }
   function getFiscalStart() { return FISCAL_START; }
   function fiscalOffset(k) { return (mparse(k).m - FISCAL_START + 12) % 12; }
   function mquarter(k) { return Math.floor(fiscalOffset(k) / 3) + 1; }
@@ -474,24 +474,79 @@
   var cache = {};
   function invalidate(month) { if (month) delete cache[month]; else cache = {}; persist(); }
 
-  /* Browser storage can be absent, sandboxed or full; every touch is guarded
-     so the product keeps working in memory when it cannot be saved. */
-  function store() { try { return root.localStorage || null; } catch (e) { return null; } }
-  var persistTimer = null, persistOn = true;
-  function persist() {
-    if (!persistOn) return;
-    clearTimeout(persistTimer);
-    persistTimer = setTimeout(function () {
-      var st = store(); if (!st) return;
-      try { st.setItem(STORAGE_KEY, JSON.stringify(exportState())); }
-      catch (e) { /* private mode or quota: the session still works, it just will not survive a reload */ }
-    }, 150);
+  /* ---------- server sync -------------------------------------------------
+     The database is the record. The browser keeps a working copy so the UI
+     stays instant, sends every change to /api/mutate, and reloads from the
+     server if a change is refused - so a rejected write can never leave the
+     screen showing something the database does not agree with.             */
+  var SYNC = { on: false, pending: 0, onError: null, onBusy: null };
+
+  function busy(delta) {
+    SYNC.pending += delta;
+    if (SYNC.onBusy) SYNC.onBusy(SYNC.pending > 0);
   }
-  function persistedAt() {
-    var st = store(); if (!st) return null;
-    try { var raw = st.getItem(STORAGE_KEY); if (!raw) return null; return JSON.parse(raw).exportedAt || null; } catch (e) { return null; }
+
+  function sync(op, args) {
+    if (!SYNC.on) return Promise.resolve({ ok: true });
+    busy(1);
+    return fetch('/api/mutate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ op: op, args: args })
+    }).then(function (r) {
+      return r.json().then(function (d) { return { ok: r.ok, status: r.status, data: d }; });
+    }).then(function (out) {
+      busy(-1);
+      if (!out.ok) {
+        var msg = (out.data && out.data.message) || 'That change could not be saved.';
+        if (SYNC.onError) SYNC.onError(msg, out.status);
+      }
+      return out;
+    }).catch(function () {
+      busy(-1);
+      if (SYNC.onError) SYNC.onError('Could not reach the server. Your change was not saved.', 0);
+      return { ok: false };
+    });
   }
-  function forgetPersisted() { var st = store(); if (!st) return; try { st.removeItem(STORAGE_KEY); } catch (e) { } }
+
+  /* Replace the whole working copy with what the server holds. */
+  function applyServerState(st) {
+    CLIENTS.length = 0;   (st.clients   || []).forEach(function (x) { CLIENTS.push(x); });
+    PROJECTS.length = 0;  (st.projects  || []).forEach(function (x) { PROJECTS.push(x); });
+    EMPLOYEES.length = 0; (st.employees || []).forEach(function (x) { EMPLOYEES.push(x); });
+    LICENCES.length = 0;  (st.licences  || []).forEach(function (x) { LICENCES.push(x); });
+    Object.keys(STORE).forEach(function (k) { delete STORE[k]; });
+    MONTHS.forEach(function (m) { STORE[m] = emptyMonth(m); });
+    Object.keys(st.ledger || {}).forEach(function (m) {
+      var src = st.ledger[m];
+      if (!STORE[m]) STORE[m] = emptyMonth(m);
+      STORE[m].revenue = src.revenue || {};
+      STORE[m].alloc   = src.alloc   || {};
+      STORE[m].empCost = src.empCost || {};
+      STORE[m].other   = src.other   || [];
+    });
+    if (st.org && st.org.fiscalStart) FISCAL_START = st.org.fiscalStart;
+    DATA_MODE = 'own';
+    cache = {};
+  }
+
+  function loadFromServer() {
+    return fetch('/api/state', { credentials: 'same-origin' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d || !d.state) return false;
+        SYNC.on = false;
+        applyServerState(d.state);
+        SYNC.on = true;
+        return true;
+      })
+      .catch(function () { return false; });
+  }
+
+  function persist() { }          /* the server is the record now */
+  function persistedAt() { return null; }
+  function forgetPersisted() { }
 
   function rollup(month) {
     if (cache[month]) return cache[month];
@@ -740,14 +795,17 @@
 
   /* ---------- mutation (prototype data entry) ------------------------------- */
   function setRevenue(month, projectId, amount) {
+    sync('setRevenue', { month: month, projectId: projectId, amount: +amount || 0 });
     snapshot(month).revenue[projectId] = Math.max(0, Math.round(amount));
     invalidate(month);
   }
   function addCost(month, projectId, category, amount) {
+    sync('addCost', { month: month, projectId: projectId, category: category, amount: +amount || 0 });
     snapshot(month).other.push({ projectId: projectId || null, category: category, amount: Math.round(amount) });
     invalidate(month);
   }
   function setAllocation(month, empId, map) {
+    sync('setAllocation', { month: month, employeeId: empId, map: map });
     var total = Object.keys(map).reduce(function (t, k) { return t + (map[k] || 0); }, 0);
     if (total > 100) return { ok: false, error: 'Allocation totals ' + total + '%. Reduce it to 100% or less before saving.' };
     var clean = {};
@@ -758,7 +816,10 @@
   }
   // whole-month allocation snapshot — used for undo and for carrying a month forward
   function getAllocations(month) { return JSON.parse(JSON.stringify(snapshot(month).alloc)); }
-  function setAllocations(month, alloc) { snapshot(month).alloc = alloc; invalidate(month); }
+  function setAllocations(month, alloc) {
+    snapshot(month).alloc = alloc; invalidate(month);
+    Object.keys(alloc).forEach(function (eid) { sync('setAllocation', { month: month, employeeId: eid, map: alloc[eid] }); });
+  }
   function copyAllocations(from, to) {
     var src = snapshot(from).alloc, dst = {}, copied = 0, dropped = 0, skipped = 0;
     EMPLOYEES.forEach(function (e) {
@@ -794,6 +855,14 @@
       if (mindex(m) >= mindex(rec.join)) { snapshot(m).empCost[id] = rec.ctc / 12; snapshot(m).alloc[id] = {}; }
     });
     invalidate();
+    sync('addEmployee', { id: id, name: rec.name, title: rec.title, dept: rec.dept,
+                          ctc: rec.ctc, join: rec.join, disc: rec.disc || 'eng' })
+      .then(function (r) {
+        if (!r || !r.ok) return;
+        MONTHS.forEach(function (m) {
+          if (mindex(m) >= mindex(rec.join)) sync('setEmpCost', { month: m, employeeId: id, monthly: rec.ctc / 12 });
+        });
+      });
     return id;
   }
 
@@ -812,21 +881,23 @@
 
   function addClient(rec) {
     var id = nextId(CLIENTS, 'C', 2);
-    CLIENTS.push({ id: id, name: rec.name, industry: rec.industry || 'Professional services', since: rec.since || CURRENT_MONTH });
+    var row = { id: id, name: rec.name, industry: rec.industry || 'Professional services', since: rec.since || CURRENT_MONTH };
+    CLIENTS.push(row);
     invalidate();
+    sync('addClient', row);
     return id;
   }
   function updateClient(id, patch) {
     var c = byId(CLIENTS, id); if (!c) return false;
     ['name', 'industry', 'since'].forEach(function (k) { if (patch[k] != null) c[k] = patch[k]; });
-    invalidate(); return true;
+    invalidate(); sync('updateClient', { id: id, patch: patch }); return true;
   }
   function clientProjects(id) { return PROJECTS.filter(function (p) { return p.clientId === id; }); }
   function deleteClient(id) {
     clientProjects(id).forEach(function (p) { deleteProject(p.id); });
     var i = CLIENTS.indexOf(byId(CLIENTS, id));
     if (i === -1) return false;
-    CLIENTS.splice(i, 1); invalidate(); return true;
+    CLIENTS.splice(i, 1); invalidate(); sync('deleteClient', { id: id }); return true;
   }
 
   function addProject(rec) {
@@ -838,14 +909,22 @@
       end: rec.end || null, disc: rec.disc || 'eng'
     });
     // seed the revenue the operator entered into the months the project runs
+    var seeded = [];
     if (+rec.revenue && rec.billable !== false) {
       MONTHS.forEach(function (m) {
         if (mindex(m) >= mindex(rec.start || CURRENT_MONTH) && (!rec.end || mindex(m) <= mindex(rec.end))) {
-          snapshot(m).revenue[id] = +rec.revenue;
+          snapshot(m).revenue[id] = +rec.revenue; seeded.push(m);
         }
       });
     }
     invalidate();
+    sync('addProject', { id: id, clientId: rec.clientId, name: rec.name, type: rec.type || 'Fixed project',
+                         billable: rec.billable !== false, disc: rec.disc || 'eng',
+                         start: rec.start || CURRENT_MONTH, end: rec.end || null })
+      .then(function (r) {
+        if (!r || !r.ok) return;
+        seeded.forEach(function (m) { sync('setRevenue', { month: m, projectId: id, amount: +rec.revenue }); });
+      });
     return id;
   }
   function updateProject(id, patch) {
@@ -853,11 +932,11 @@
     ['name', 'type', 'clientId', 'start', 'end', 'disc', 'billable'].forEach(function (k) {
       if (patch[k] !== undefined) p[k] = patch[k];
     });
-    invalidate(); return true;
+    invalidate(); sync('updateProject', { id: id, patch: patch }); return true;
   }
   function archiveProject(id, endMonth) {
     var p = byId(PROJECTS, id); if (!p) return false;
-    p.end = endMonth; invalidate(); return true;
+    p.end = endMonth; invalidate(); sync('updateProject', { id: id, patch: { end: endMonth } }); return true;
   }
   function deleteProject(id) {
     var p = byId(PROJECTS, id); if (!p) return false;
@@ -869,13 +948,13 @@
     });
     /* a project's own licences go with it; company-wide ones are untouched */
     PROJECTS.splice(PROJECTS.indexOf(p), 1);
-    invalidate(); return true;
+    invalidate(); sync('deleteProject', { id: id }); return true;
   }
 
   function updateEmployee(id, patch) {
     var e = byId(EMPLOYEES, id); if (!e) return false;
     ['name', 'title', 'dept', 'disc', 'join'].forEach(function (k) { if (patch[k] != null) e[k] = patch[k]; });
-    invalidate(); return true;
+    invalidate(); sync('updateEmployee', { id: id, patch: patch }); return true;
   }
   // a pay change takes effect from a month forward; earlier months are untouched
   function setEmployeeCtc(id, ctc, fromMonth) {
@@ -886,7 +965,12 @@
       snapshot(m).empCost[id] = ctc / 12;
     });
     e.baseCtc = ctc;
-    invalidate(); return true;
+    invalidate();
+    MONTHS.forEach(function (m) {
+      if (mindex(m) < mindex(fromMonth) || mindex(m) < mindex(e.join)) return;
+      sync('setEmpCost', { month: m, employeeId: id, monthly: ctc / 12 });
+    });
+    return true;
   }
   function deleteEmployee(id) {
     var e = byId(EMPLOYEES, id); if (!e) return false;
@@ -895,7 +979,7 @@
       delete snap.empCost[id]; delete snap.alloc[id];
     });
     EMPLOYEES.splice(EMPLOYEES.indexOf(e), 1);
-    invalidate(); return true;
+    invalidate(); sync('deleteEmployee', { id: id }); return true;
   }
 
   /* ---------- backup and restore ------------------------------------------ */
@@ -924,20 +1008,21 @@
   /* ---------- licence register: create, amend, delete ----------------------- */
   function addLicence(rec) {
     var id = nextId(LICENCES, 'L', 2);
-    LICENCES.push({ id: id, name: rec.name, vendor: rec.vendor || '', price: +rec.price || 0, start: rec.start,
-      months: Math.max(1, +rec.months || 1), note: rec.note || '' });
-    invalidate(); return id;
+    var row = { id: id, name: rec.name, vendor: rec.vendor || '', price: +rec.price || 0, start: rec.start,
+      months: Math.max(1, +rec.months || 1), note: rec.note || '' };
+    LICENCES.push(row);
+    invalidate(); sync('addLicence', row); return id;
   }
   function updateLicence(id, rec) {
     var l = byId(LICENCES, id); if (!l) return false;
     ['name', 'vendor', 'note', 'start'].forEach(function (k) { if (rec[k] != null) l[k] = rec[k]; });
     if (rec.price != null) l.price = +rec.price || 0;
     if (rec.months != null) l.months = Math.max(1, +rec.months || 1);
-    invalidate(); return true;
+    invalidate(); sync('updateLicence', { id: id, patch: rec }); return true;
   }
   function deleteLicence(id) {
     var l = byId(LICENCES, id); if (!l) return false;
-    LICENCES.splice(LICENCES.indexOf(l), 1); invalidate(); return true;
+    LICENCES.splice(LICENCES.indexOf(l), 1); invalidate(); sync('deleteLicence', { id: id }); return true;
   }
 
   function exportState() {
@@ -998,16 +1083,8 @@
     invalidate();
   }
   /* boot: pick up whatever this browser saved last time */
-  (function boot() {
-    var st = store(), raw = null;
-    if (!st) return;
-    try { raw = st.getItem(STORAGE_KEY); } catch (e) { }
-    if (!raw) return;
-    persistOn = false;
-    try { var obj = JSON.parse(raw); var res = importState(obj); if (!res.ok) forgetPersisted(); }
-    catch (e) { forgetPersisted(); }
-    persistOn = true;
-  })();
+  /* No boot from browser storage any more. The app starts empty and the
+     signed-in session fills it from /api/state - see App.auth.mount(). */
 
   root.CTC = {
     dataMode: dataMode, clearAll: clearAll, restoreDemo: restoreDemo, persistedAt: persistedAt, forgetPersisted: forgetPersisted,
@@ -1027,6 +1104,7 @@
     addClient: addClient, updateClient: updateClient, deleteClient: deleteClient, clientProjects: clientProjects,
     addProject: addProject, updateProject: updateProject, archiveProject: archiveProject, deleteProject: deleteProject,
     updateEmployee: updateEmployee, setEmployeeCtc: setEmployeeCtc, deleteEmployee: deleteEmployee,
-    exportState: exportState, importState: importState, byId: byId
+    exportState: exportState, importState: importState, byId: byId,
+    loadFromServer: loadFromServer, syncState: SYNC
   };
 })(typeof window !== 'undefined' ? window : globalThis);
