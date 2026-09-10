@@ -452,6 +452,83 @@
       'Monthly cost is annual CTC ÷ 12.');
   };
 
+  /* ---------- passwords ------------------------------------------------------
+     Both live here with the other dialogs rather than inside the screens that
+     open them, so Settings and Administration open exactly the same thing. The
+     minimum length comes from U.PASSWORD_MIN, which mirrors the database's
+     assert_password_ok(). */
+  function pwMsg(cls, text) {
+    var m = document.getElementById('dlg-msg');
+    m.className = cls; m.textContent = text;
+  }
+
+  App.dialogs.password = function () {
+    var cur = field({ label: 'Current password', type: 'password', required: true });
+    var a = field({ label: 'New password', type: 'password', required: true,
+                    hint: 'At least ' + U.PASSWORD_MIN + ' characters.' });
+    var b = field({ label: 'Repeat new password', type: 'password', required: true });
+
+    var save = el('<button class="btn btn-primary" type="button">Change password</button>');
+    save.addEventListener('click', function () {
+      pwMsg('muted', '');
+      [cur, a, b].forEach(function (f) { f.clear(); });
+      if (!cur.value()) { cur.fail('Enter your current password.'); return; }
+      if (a.value().length < U.PASSWORD_MIN) { a.fail('At least ' + U.PASSWORD_MIN + ' characters.'); return; }
+      if (a.value() !== b.value()) { b.fail('The two passwords do not match.'); return; }
+      if (a.value() === cur.value()) { a.fail('That is already your password.'); return; }
+
+      save.disabled = true;
+      pwMsg('muted', 'Saving…');
+      C.setOwnPassword(cur.value(), a.value()).then(function (out) {
+        save.disabled = false;
+        if (out && out.ok) {
+          dlg.close();
+          U.toast('Password changed', { kind: 'success',
+            detail: 'Every other sign-in for your account has ended.' });
+        } else {
+          pwMsg('err', (out && out.data && out.data.message) || 'That change could not be saved.');
+        }
+      });
+    });
+
+    App.openDialog('Change your password', stack([cur, grid([a, b])]), [save],
+      'You stay signed in here. Every other sign-in for your account ends.');
+  };
+
+  /* Owner only, and the server checks that too - this dialog opening is not
+     the permission. */
+  App.dialogs.resetPassword = function (email) {
+    var a = field({ label: 'New password', type: 'password', required: true,
+                    hint: 'At least ' + U.PASSWORD_MIN + ' characters.' });
+    var b = field({ label: 'Repeat new password', type: 'password', required: true });
+    var warn = el('<div class="callout" style="border-left-color:var(--warn-line)">' +
+      '<strong>This signs them out everywhere.</strong> Every session they have open ends now, ' +
+      'which is the point if the password leaked. They cannot get back in until you tell them ' +
+      'the new one.</div>');
+
+    var save = el('<button class="btn btn-primary" type="button">Reset password</button>');
+    save.addEventListener('click', function () {
+      pwMsg('muted', '');
+      [a, b].forEach(function (f) { f.clear(); });
+      if (a.value().length < U.PASSWORD_MIN) { a.fail('At least ' + U.PASSWORD_MIN + ' characters.'); return; }
+      if (a.value() !== b.value()) { b.fail('The two passwords do not match.'); return; }
+
+      save.disabled = true;
+      pwMsg('muted', 'Saving…');
+      C.adminSetPassword(email, a.value()).then(function (out) {
+        save.disabled = false;
+        if (out && out.ok) {
+          dlg.close();
+          U.toast('Password reset', { kind: 'success', detail: email + ' must sign in again.' });
+        } else {
+          pwMsg('err', (out && out.data && out.data.message) || 'That change could not be saved.');
+        }
+      });
+    });
+
+    App.openDialog('Reset password', stack([warn, grid([a, b])]), [save], email);
+  };
+
   App.dialogs.custom = function () {
     var s = App.state;
     var from = field({ label: 'From', type: 'select', value: s.custom[0], options: monthOpts() });

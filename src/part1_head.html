@@ -914,14 +914,19 @@ tr:hover .row-act{color:var(--text-2)}
 
 /* ===== settings ========================================================== */
 .set-list{display:flex;flex-direction:column}
-.set-row{display:grid;grid-template-columns:minmax(220px,1.3fr) minmax(220px,1fr);gap:20px;align-items:center;
+.set-row{display:grid;grid-template-columns:minmax(220px,1fr) minmax(230px,300px);gap:20px;align-items:center;
   padding:14px 16px;border-bottom:1px solid var(--border-sub)}
 .set-row:last-child{border-bottom:0}
 .set-row > .set-lab > strong{display:block;font-size:13.5px;font-weight:600;color:var(--text)}
 .set-row > .set-lab > span{display:block;font-size:12px;color:var(--text-3);margin-top:3px;max-width:62ch}
 .set-row .set-lab span strong{color:var(--text-2);font-weight:600}
 .set-row > :last-child{justify-self:end}
-.set-row select{min-width:200px}
+.set-row select{min-width:0;width:100%}
+/* Readout strips size to the column rather than to their content, so a
+   long band label wraps inside its own cell instead of pushing the row
+   taller than its neighbours. */
+.set-preview>*{min-width:0}
+.set-row .pill-row{flex-wrap:nowrap}
 .set-preview{display:flex;flex-wrap:wrap;gap:8px 1px;justify-self:stretch}
 .set-preview span{flex:1;min-width:104px;background:var(--layer-3);border:1px solid var(--border);padding:8px 10px;
   font-size:11.5px;font-weight:500;letter-spacing:-.005em;color:var(--text-3)}
@@ -1512,6 +1517,29 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
 .si-points .ico{width:17px;height:17px;flex:none;margin-top:2px;color:#8fd6f5;
   fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
 .si-foot{font-size:12px;color:rgba(255,255,255,.6)}
+
+/* Identity on the settings Account panel. The email was being clipped when it
+   shared a fixed control column with the role chip. */
+.set-ident{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.set-ident .em{font-size:13px;color:var(--text-2);word-break:break-all}
+
+/* Accounts in Administration. A row is a person, their role, and the single
+   action available on them. */
+.acct-list{display:flex;flex-direction:column}
+.acct-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:14px;align-items:center;
+  padding:13px 2px;border-bottom:1px solid var(--border)}
+.acct-row:last-child{border-bottom:0}
+.acct-row .who{display:flex;flex-direction:column;gap:3px;min-width:0}
+.acct-row .nm{font-size:13.5px;font-weight:600;color:var(--text)}
+.acct-row .em{font-size:12px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.acct-row .you{font-size:11px;font-weight:500;color:var(--text-3);border:1px solid var(--border);
+  border-radius:var(--r-pill);padding:1px 7px;margin-left:5px}
+.acct-row .rl{text-transform:capitalize;justify-self:end}
+.acct-row .act{display:flex;justify-content:flex-end}
+@media (max-width:640px){
+  .acct-row{grid-template-columns:minmax(0,1fr) auto;row-gap:11px}
+  .acct-row .act{grid-column:1/-1;justify-content:flex-start}
+}
 
 .si-panel{display:flex;align-items:center;justify-content:center;padding:clamp(24px,4vw,48px)}
 .si-card{width:100%;max-width:392px}

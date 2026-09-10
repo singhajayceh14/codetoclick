@@ -531,63 +531,52 @@
     root.App.openDialog('Clear all data', body, [go], 'Start from an empty company');
   }
   /* ---------- accounts ------------------------------------------------------ */
+  /* Sign-ins, not the payroll register - users and employees are separate
+     things and nothing links them. Resetting is owner only; the server checks
+     that as well, because a hidden button is not a permission. */
   function accountsPane() {
     var wrap = el('<div class="stack"></div>');
     var me = root.AUTH && root.AUTH.user ? root.AUTH.user() : null;
-    var others = C.USERS.filter(function (u) { return !me || u.email !== me.email; });
+    var isOwner = root.AUTH && root.AUTH.role() === 'owner';
 
-    var list = el('<div class="set-list"></div>');
-    C.USERS.forEach(function (u) {
-      var mine = me && u.email === me.email;
-      list.appendChild(rowOf(u.name || u.email,
-        esc(u.email) + ' &middot; ' + esc(u.role) + (mine ? ' &middot; this is you' : '') +
-        (u.active === false ? ' &middot; <span class="tag">inactive</span>' : ''),
-        el('<span class="tag">' + esc(u.role) + '</span>')));
-    });
-    wrap.appendChild(U.panel('Accounts', C.USERS.length + ' sign-in' + (C.USERS.length === 1 ? '' : 's') +
-      ' in this organization', list, true));
-
-    var put = el('<div style="display:flex;flex-direction:column;gap:12px"></div>');
-    put.appendChild(el('<div class="callout" style="border-left-color:var(--warn-line)">' +
-      '<strong>A reset signs that person out everywhere.</strong> Every session they have open ends ' +
-      'immediately, which is the point if the password leaked. They will need the new password to get ' +
-      'back in, so tell them what it is.</div>'));
-
-    if (!others.length) {
-      put.appendChild(el('<div class="empty">There is no other account in this organization to reset.</div>'));
-      wrap.appendChild(U.panel('Reset a password', null, put, true));
+    if (!C.USERS.length) {
+      wrap.appendChild(U.panel('Accounts', null,
+        el('<div class="empty">No accounts loaded yet.</div>'), true));
       return wrap;
     }
 
-    var pick = U.field({ label: 'Account', type: 'select', required: true,
-      options: others.map(function (u) {
-        return { v: u.email, l: (u.name || u.email) + ' - ' + u.email + ' (' + u.role + ')' };
-      }) });
-    var pair = U.passwordPair('New password for this account');
-    var msg  = el('<div style="min-height:17px;font-size:12px"></div>');
-    var go   = H.btn('Reset this password', 'btn-primary', function () {
-      msg.textContent = ''; msg.className = '';
-      if (!pair.validate()) return;
-      go.disabled = true;
-      C.adminSetPassword(pick.value(), pair.value()).then(function (out) {
-        go.disabled = false;
-        if (out && out.ok) {
-          pair.clear();
-          msg.className = 'ok';
-          msg.textContent = 'Password reset for ' + pick.value() + '. Their sessions have ended.';
-          U.toast('Password reset', { kind: 'success', detail: pick.value() + ' must sign in again.' });
-        } else {
-          msg.className = 'err';
-          msg.textContent = (out && out.data && out.data.message) || 'That change could not be saved.';
-        }
-      });
+    var list = el('<div class="acct-list"></div>');
+    C.USERS.forEach(function (u) {
+      var mine = me && u.email === me.email;
+      var r = el('<div class="acct-row"></div>');
+      r.appendChild(el('<div class="who">' +
+        '<span class="nm">' + esc(u.name || u.email) + (mine ? ' <span class="you">you</span>' : '') + '</span>' +
+        '<span class="em">' + esc(u.email) + '</span></div>'));
+      r.appendChild(el('<span class="tag rl">' + esc(u.role) + '</span>'));
+
+      var act = el('<div class="act"></div>');
+      if (mine) {
+        act.appendChild(H.btn('Change password', '', function () { root.App.dialogs.password(); }));
+      } else if (isOwner) {
+        act.appendChild(H.btn('Reset password', '', function () {
+          root.App.dialogs.resetPassword(u.email);
+        }));
+      } else {
+        act.appendChild(el('<span class="muted" style="font-size:12px">Owner only</span>'));
+      }
+      r.appendChild(act);
+      list.appendChild(r);
     });
-    put.appendChild(U.formGrid([pick].concat(pair.fields)));
-    put.appendChild(msg);
-    var bar = el('<div></div>'); bar.appendChild(go); put.appendChild(bar);
-    put.appendChild(el('<div class="fl-hint">To change your own password, use Settings - it keeps you ' +
-      'signed in and asks for your current one.</div>'));
-    wrap.appendChild(U.panel('Reset a password', 'Owner only', put, true));
+
+    wrap.appendChild(U.panel('Accounts',
+      C.USERS.length + ' sign-in' + (C.USERS.length === 1 ? '' : 's') + ' in this organization',
+      list, true));
+
+    if (isOwner) {
+      wrap.appendChild(el('<div class="callout">Resetting someone’s password ends every session ' +
+        'they have open. Your own password is changed from the row above, which keeps you signed in ' +
+        'and asks for the current one.</div>'));
+    }
     return wrap;
   }
 
