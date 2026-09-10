@@ -2004,6 +2004,10 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
      STORE[month]. A later month's records never touch an earlier month's —
      that is what makes each month a financial snapshot.                       */
   var STORE = {};
+  /* month -> 'open' | 'closed'. The server is the authority; the browser keeps
+     it so a backup can record which months were closed and a restore can put
+     them back that way. */
+  var PERIOD_STATUS = {};
 
   var PINNED_REVENUE = { '2026-09': { P01: 40000 } };
 
@@ -2275,6 +2279,10 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
       STORE[m].alloc   = src.alloc   || {};
       STORE[m].empCost = src.empCost || {};
       STORE[m].other   = src.other   || [];
+    });
+    Object.keys(PERIOD_STATUS).forEach(function (k) { delete PERIOD_STATUS[k]; });
+    (st.periods || []).forEach(function (p) {
+      if (p && p.month) PERIOD_STATUS[p.month] = p.status === 'closed' ? 'closed' : 'open';
     });
     if (st.org && st.org.fiscalStart) FISCAL_START = st.org.fiscalStart;
     DATA_MODE = 'own';
@@ -2733,7 +2741,7 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
   }
 
   /* ---------- backup and restore ------------------------------------------ */
-  var BACKUP_VERSION = 1;
+  var BACKUP_VERSION = 2;   /* 2 adds period open/closed status */
 
 
   /* ---------- every cost line in a month, booked or derived ------------------
@@ -2784,6 +2792,9 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
       currentMonth: CURRENT_MONTH,
       mode: DATA_MODE,
       months: MONTHS.slice(),
+      periods: MONTHS.map(function (m) {
+        return { month: m, status: PERIOD_STATUS[m] === 'closed' ? 'closed' : 'open' };
+      }),
       clients: JSON.parse(JSON.stringify(CLIENTS)),
       projects: JSON.parse(JSON.stringify(PROJECTS)),
       employees: JSON.parse(JSON.stringify(EMPLOYEES)),
@@ -2808,8 +2819,17 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
     if (Array.isArray(obj.licences)) { LICENCES.length = 0; obj.licences.forEach(function (x) { LICENCES.push(x); }); }
     Object.keys(STORE).forEach(function (k) { delete STORE[k]; });
     Object.keys(obj.ledger).forEach(function (k) { if (MONTHS.indexOf(k) !== -1) STORE[k] = obj.ledger[k]; });
+    Object.keys(PERIOD_STATUS).forEach(function (k) { delete PERIOD_STATUS[k]; });
+    if (Array.isArray(obj.periods)) {
+      obj.periods.forEach(function (p) {
+        if (p && p.month) PERIOD_STATUS[p.month] = p.status === 'closed' ? 'closed' : 'open';
+      });
+    }
     MONTHS.forEach(snapshot);
     invalidate();
+    /* The database is the record. Without this the restore lived only in this
+       tab and the next /api/state quietly replaced it with the old figures. */
+    sync('restoreSnapshot', { snapshot: obj });
     return {
       ok: true,
       clients: CLIENTS.length, projects: PROJECTS.length, employees: EMPLOYEES.length,

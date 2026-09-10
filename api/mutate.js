@@ -30,7 +30,7 @@ export default async function handler(req, res) {
     console.error('mutate', op, 'failed:', e.message);
     /* The database's own rules speak plainly - pass them through rather than
        inventing a second set of messages that can drift out of step. */
-    const known = /over 100%|is closed|already|duplicate|violates|No clients|No projects|No employees/i.test(e.message);
+    const known = /over 100%|is closed|already|duplicate|violates|No clients|No projects|No employees|backup/i.test(e.message);
     res.status(known ? 409 : 500).json({
       error: known ? 'rejected' : 'server',
       message: known ? e.message : 'That change could not be saved.'
