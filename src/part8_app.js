@@ -147,9 +147,15 @@
     var box = document.getElementById('periods');
     box.innerHTML = '';
     var monthOnly = !!MONTH_ONLY[s.route];
-    PERIODS.forEach(function (p) {
+
+    /* These screens are a single month by definition, so the period buttons
+       could only ever be shown greyed out. A control that can never be used is
+       noise: hide the bar and let the month in the header speak for itself. */
+    var bar = document.querySelector('.periodbar');
+    if (bar) bar.hidden = monthOnly;
+
+    if (!monthOnly) PERIODS.forEach(function (p) {
       var b = el('<button aria-pressed="' + (s.period === p[0]) + '">' + esc(p[1]) + '</button>');
-      if (monthOnly) { b.disabled = true; b.style.opacity = .35; b.title = 'This screen shows a single month'; }
       b.addEventListener('click', function () {
         if (p[0] === 'custom') { App.dialogs.custom(); return; }
         if (p[0] === 'prev') { var pm = C.maddMonths(s.month, -1); if (C.MONTHS.indexOf(pm) !== -1) { s.month = pm; s.period = 'month'; App.render(); } return; }

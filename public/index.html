@@ -333,6 +333,9 @@ a{color:var(--link);text-decoration:none}
 /* --- period bar --------------------------------------------------------- */
 .periodbar{display:flex;align-items:center;gap:14px;padding:16px 24px 0;flex-wrap:wrap;
   max-width:1560px;margin:0 auto;width:100%}
+/* Hidden outright on screens that are a single month by definition. Needs to
+   sit beside the base rule, not inside a breakpoint, or display:flex wins. */
+.periodbar[hidden]{display:none}
 .periods{display:inline-flex;padding:3px;gap:2px;background:var(--layer-2);
   border-radius:var(--r-md);flex:none}
 .periods button{background:none;border:0;padding:6px 13px;font-size:12.5px;font-weight:500;
@@ -733,6 +736,10 @@ table.grid tr.sub-row td:first-child{padding-left:34px;color:var(--text-2)}
 .fld.invalid .fl-ctl{border-color:var(--err);background:var(--err-bg)}
 .fld.invalid .fl-hint{color:var(--err);font-weight:500;display:flex;gap:6px;align-items:flex-start}
 .fld.ok .fl-ctl{border-color:var(--ok)}
+/* A field held shut by a safeguard rather than by a permission. Dashed so it
+   reads as deliberately closed, not as broken or disabled by a bug. */
+.fld.locked .fl-ctl{background:var(--layer-2);border-style:dashed}
+.fld.locked input{color:var(--text-3);cursor:not-allowed}
 .form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(210px,100%),1fr));gap:16px}
 .form-sec{display:flex;align-items:center;gap:10px;margin:6px 0 -2px}
 .form-sec .lb{font-size:12.5px;font-weight:600;letter-spacing:-.01em;color:var(--text)}
@@ -1528,24 +1535,6 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
 .set-ident{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
 .set-ident .em{font-size:13px;color:var(--text-2);word-break:break-all}
 
-/* Accounts in Administration. A row is a person, their role, and the single
-   action available on them. */
-.acct-list{display:flex;flex-direction:column}
-.acct-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:14px;align-items:center;
-  padding:13px 2px;border-bottom:1px solid var(--border)}
-.acct-row:last-child{border-bottom:0}
-.acct-row .who{display:flex;flex-direction:column;gap:3px;min-width:0}
-.acct-row .nm{font-size:13.5px;font-weight:600;color:var(--text)}
-.acct-row .em{font-size:12px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.acct-row .you{font-size:11px;font-weight:500;color:var(--text-3);border:1px solid var(--border);
-  border-radius:var(--r-pill);padding:1px 7px;margin-left:5px}
-.acct-row .rl{text-transform:capitalize;justify-self:end}
-.acct-row .act{display:flex;justify-content:flex-end}
-@media (max-width:640px){
-  .acct-row{grid-template-columns:minmax(0,1fr) auto;row-gap:11px}
-  .acct-row .act{grid-column:1/-1;justify-content:flex-start}
-}
-
 .si-panel{display:flex;align-items:center;justify-content:center;padding:clamp(24px,4vw,48px)}
 .si-card{width:100%;max-width:392px}
 .si-card h1{font-size:30px;font-weight:640;letter-spacing:-.032em;line-height:1.14;margin:0 0 8px}
@@ -1746,6 +1735,7 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
   <symbol id="i-columns" viewBox="0 0 24 24"><!-- lucide:columns-3 --><rect width="18" height="18" x="3" y="3" rx="2" /><path d="M9 3v18" /><path d="M15 3v18" /></symbol>
   <symbol id="i-search" viewBox="0 0 24 24"><!-- lucide:search --><path d="m21 21-4.34-4.34" /><circle cx="11" cy="11" r="8" /></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><!-- lucide:check --><path d="M20 6 9 17l-5-5" /></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24"><!-- lucide:key-round --><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z" /><circle cx="16.5" cy="7.5" r=".5" fill="currentColor" /></symbol>
   <symbol id="i-eye" viewBox="0 0 24 24"><!-- lucide:eye --><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" /><circle cx="12" cy="12" r="3" /></symbol>
   <symbol id="i-eye-off" viewBox="0 0 24 24"><!-- lucide:eye-off --><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" /><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c6.5 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" /><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3.5 7 10 7a9.74 9.74 0 0 0 5.39-1.61" /><path d="m2 2 20 20" /></symbol>
   <symbol id="i-info" viewBox="0 0 24 24"><!-- lucide:info --><circle cx="12" cy="12" r="10" /><path d="M12 16v-4" /><path d="M12 8h.01" /></symbol>
@@ -2851,6 +2841,10 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
     });
     e.baseCtc = ctc;
     invalidate();
+    /* The salary register, so the headline CTC survives a reload. Without this
+       the monthly costs below moved and baseCtc came back from the server as
+       the joining figure - the two disagreeing on the same person's pay. */
+    sync('setEmployeeCtc', { employeeId: id, ctc: ctc, from: fromMonth });
     MONTHS.forEach(function (m) {
       if (mindex(m) < mindex(fromMonth) || mindex(m) < mindex(e.join)) return;
       sync('setEmpCost', { month: m, employeeId: id, monthly: ctc / 12 });
@@ -6171,9 +6165,15 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
     var box = document.getElementById('periods');
     box.innerHTML = '';
     var monthOnly = !!MONTH_ONLY[s.route];
-    PERIODS.forEach(function (p) {
+
+    /* These screens are a single month by definition, so the period buttons
+       could only ever be shown greyed out. A control that can never be used is
+       noise: hide the bar and let the month in the header speak for itself. */
+    var bar = document.querySelector('.periodbar');
+    if (bar) bar.hidden = monthOnly;
+
+    if (!monthOnly) PERIODS.forEach(function (p) {
       var b = el('<button aria-pressed="' + (s.period === p[0]) + '">' + esc(p[1]) + '</button>');
-      if (monthOnly) { b.disabled = true; b.style.opacity = .35; b.title = 'This screen shows a single month'; }
       b.addEventListener('click', function () {
         if (p[0] === 'custom') { App.dialogs.custom(); return; }
         if (p[0] === 'prev') { var pm = C.maddMonths(s.month, -1); if (C.MONTHS.indexOf(pm) !== -1) { s.month = pm; s.period = 'month'; App.render(); } return; }
@@ -7315,7 +7315,10 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
     currency: 'USD', scale: 'international', pctDp: 1,
     bandHealthy: 35, bandWatch: 20,
     allocStep: 5, fiscalStart: 1, navCollapsed: false, navGroups: {},
-    defaultPeriod: 'month', landing: 'dashboard'
+    defaultPeriod: 'month', landing: 'dashboard',
+    /* Pay is the one figure that moves every downstream number, so amending it
+       is off until someone deliberately turns it on. */
+    ctcEditable: false
   };
   var state = null;
 
@@ -7492,6 +7495,21 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
         function (v) { change('defaultPeriod', v); })));
     g.appendChild(U.panel('Defaults', null, df, true));
     f.appendChild(g);
+
+    /* --- safeguards --- */
+    f.appendChild(H.section('Safeguards'));
+    var guard = el('<div class="set-list"></div>');
+    guard.appendChild(row('Amending employee CTC',
+      'Pay drives every cost, margin and profit figure in the product, so it is locked by default. ' +
+      'Unlock it while you are correcting a salary, then lock it again. Adding a new person always ' +
+      'asks for their CTC — this only governs changing it afterwards.',
+      seg(S.ctcEditable ? 'on' : 'off',
+        [{ v: 'off', l: 'Locked' }, { v: 'on', l: 'Editable' }],
+        function (v) { change('ctcEditable', v === 'on'); })));
+    guard.appendChild(row('Where it applies',
+      'Administration → People, on the CTC field of an existing person.',
+      H.btn('Open people', '', function () { root.App.go('admin', { tab: 'employees' }); })));
+    f.appendChild(U.panel('Editing', 'A catch against changing pay by accident', guard, true));
 
     /* --- account --- */
     var who = root.AUTH && root.AUTH.user ? root.AUTH.user() : null;
@@ -7713,12 +7731,19 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
     });
     var disc = field({ label: 'Delivery discipline', type: 'select', value: e0 ? e0.disc : 'eng', options: DISC });
     var join = field({ label: 'Joining month', type: 'select', value: e0 ? e0.join : m, options: monthOpts(), hint: 'No cost is carried before this month.' });
+    /* Amending pay is behind the Settings safeguard; setting it on a new person
+       is not, because you cannot add someone without it. This is a catch against
+       a slip, not a permission - the server still requires owner or finance. */
+    var ctcLocked = e0 && !(root.SET && root.SET.get().ctcEditable);
     var ctc = field({
       label: 'Annual CTC', required: true, type: 'number', step: 600, min: 0, prefix: curSymbol(),
       value: cur ? cur.ctc : (e0 ? e0.baseCtc : 48000),
-      hint: e0 ? 'Applies from <strong>' + esc(C.mlabel(m)) + '</strong> forward. Earlier months keep the cost they closed with.'
+      hint: ctcLocked
+        ? 'Locked. Turn on <strong>Settings → Safeguards → Amending employee CTC</strong> to change it.'
+        : e0 ? 'Applies from <strong>' + esc(C.mlabel(m)) + '</strong> forward. Earlier months keep the cost they closed with.'
         : 'Divided by twelve to give the monthly cost.'
     });
+    if (ctcLocked) { ctc.input.disabled = true; ctc.classList.add('locked'); }
     var out = U.readout('<b>' + money(0) + '</b> monthly cost');
     function calc() { out.innerHTML = '<b>' + money((+ctc.value() || 0) / 12) + '</b> monthly cost, charged from ' + esc(C.mlabel(join.value())); }
     ctc.input.addEventListener('input', calc);
@@ -7801,7 +7826,9 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
     Edit: { icon: 'edit', tip: 'Edit details' },
     Delete: { icon: 'trash', tip: 'Delete from every month', danger: true },
     Archive: { icon: 'archive', tip: 'Close the project, keep its history' },
-    Allocate: { icon: 'sliders', tip: 'Open the allocation workbench' }
+    Allocate: { icon: 'sliders', tip: 'Open the allocation workbench' },
+    'Change password': { icon: 'key', tip: 'Change your own password' },
+    'Reset password': { icon: 'key', tip: 'Set a new password for this account' }
   };
   function actionCell(list) {
     return '<div class="row-acts">' + list.map(function (label) {
@@ -8079,50 +8106,53 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
   }
   /* ---------- accounts ------------------------------------------------------ */
   /* Sign-ins, not the payroll register - users and employees are separate
-     things and nothing links them. Resetting is owner only; the server checks
-     that as well, because a hidden button is not a permission. */
+     things and nothing links them. Built with U.table like every other tab on
+     this screen, so it sorts, exports and insets the same way. Resetting is
+     owner only, and the server checks that too. */
   function accountsPane() {
     var wrap = el('<div class="stack"></div>');
     var me = root.AUTH && root.AUTH.user ? root.AUTH.user() : null;
     var isOwner = root.AUTH && root.AUTH.role() === 'owner';
 
-    if (!C.USERS.length) {
-      wrap.appendChild(U.panel('Accounts', null,
-        el('<div class="empty">No accounts loaded yet.</div>'), true));
-      return wrap;
-    }
+    var rows = C.USERS.map(function (u) {
+      return {
+        id: u.email, name: u.name || u.email, email: u.email,
+        role: u.role, mine: !!(me && u.email === me.email), active: u.active !== false
+      };
+    });
 
-    var list = el('<div class="acct-list"></div>');
-    C.USERS.forEach(function (u) {
-      var mine = me && u.email === me.email;
-      var r = el('<div class="acct-row"></div>');
-      r.appendChild(el('<div class="who">' +
-        '<span class="nm">' + esc(u.name || u.email) + (mine ? ' <span class="you">you</span>' : '') + '</span>' +
-        '<span class="em">' + esc(u.email) + '</span></div>'));
-      r.appendChild(el('<span class="tag rl">' + esc(u.role) + '</span>'));
-
-      var act = el('<div class="act"></div>');
-      if (mine) {
-        act.appendChild(H.btn('Change password', '', function () { root.App.dialogs.password(); }));
-      } else if (isOwner) {
-        act.appendChild(H.btn('Reset password', '', function () {
-          root.App.dialogs.resetPassword(u.email);
-        }));
-      } else {
-        act.appendChild(el('<span class="muted" style="font-size:12px">Owner only</span>'));
+    var t = U.table([
+      { key: 'name', label: 'Person', cell: function (x) {
+          return '<strong>' + esc(x.name) + '</strong>' +
+                 (x.mine ? ' <span class="tag">you</span>' : '') +
+                 (x.active ? '' : ' <span class="tag">inactive</span>'); } },
+      { key: 'email', label: 'Email', cell: function (x) {
+          return '<span class="muted">' + esc(x.email) + '</span>'; } },
+      { key: 'role', label: 'Role', cell: function (x) {
+          return '<span class="tag">' + esc(x.role) + '</span>'; } },
+      { key: 'act', label: '', sortable: false, num: true, hideable: false, noExport: true,
+        cell: function (x) {
+          if (x.mine) return actionCell(['Change password']);
+          return isOwner ? actionCell(['Reset password']) : '';
+        } }
+    ], rows, {
+      title: 'Accounts', subtitle: 'Code to Click', exportName: 'Accounts',
+      sortKey: 'name', sortDir: 1, id: 'admin-accounts',
+      empty: 'No accounts have loaded yet.',
+      onAction: function (x, label) {
+        if (label === 'Change password') root.App.dialogs.password();
+        else root.App.dialogs.resetPassword(x.email);
       }
-      r.appendChild(act);
-      list.appendChild(r);
     });
 
     wrap.appendChild(U.panel('Accounts',
       C.USERS.length + ' sign-in' + (C.USERS.length === 1 ? '' : 's') + ' in this organization',
-      list, true));
+      t, true));
 
     if (isOwner) {
-      wrap.appendChild(el('<div class="callout">Resetting someone’s password ends every session ' +
-        'they have open. Your own password is changed from the row above, which keeps you signed in ' +
-        'and asks for the current one.</div>'));
+      wrap.appendChild(el('<div class="callout">Resetting a password ends every session that ' +
+        'person has open. Your own is changed from your row, which keeps you signed in and asks ' +
+        'for the current one.</div>'));
     }
     return wrap;
   }

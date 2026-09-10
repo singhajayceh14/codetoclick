@@ -25,7 +25,10 @@
     currency: 'USD', scale: 'international', pctDp: 1,
     bandHealthy: 35, bandWatch: 20,
     allocStep: 5, fiscalStart: 1, navCollapsed: false, navGroups: {},
-    defaultPeriod: 'month', landing: 'dashboard'
+    defaultPeriod: 'month', landing: 'dashboard',
+    /* Pay is the one figure that moves every downstream number, so amending it
+       is off until someone deliberately turns it on. */
+    ctcEditable: false
   };
   var state = null;
 
@@ -202,6 +205,21 @@
         function (v) { change('defaultPeriod', v); })));
     g.appendChild(U.panel('Defaults', null, df, true));
     f.appendChild(g);
+
+    /* --- safeguards --- */
+    f.appendChild(H.section('Safeguards'));
+    var guard = el('<div class="set-list"></div>');
+    guard.appendChild(row('Amending employee CTC',
+      'Pay drives every cost, margin and profit figure in the product, so it is locked by default. ' +
+      'Unlock it while you are correcting a salary, then lock it again. Adding a new person always ' +
+      'asks for their CTC — this only governs changing it afterwards.',
+      seg(S.ctcEditable ? 'on' : 'off',
+        [{ v: 'off', l: 'Locked' }, { v: 'on', l: 'Editable' }],
+        function (v) { change('ctcEditable', v === 'on'); })));
+    guard.appendChild(row('Where it applies',
+      'Administration → People, on the CTC field of an existing person.',
+      H.btn('Open people', '', function () { root.App.go('admin', { tab: 'employees' }); })));
+    f.appendChild(U.panel('Editing', 'A catch against changing pay by accident', guard, true));
 
     /* --- account --- */
     var who = root.AUTH && root.AUTH.user ? root.AUTH.user() : null;

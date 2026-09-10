@@ -1011,6 +1011,10 @@
     });
     e.baseCtc = ctc;
     invalidate();
+    /* The salary register, so the headline CTC survives a reload. Without this
+       the monthly costs below moved and baseCtc came back from the server as
+       the joining figure - the two disagreeing on the same person's pay. */
+    sync('setEmployeeCtc', { employeeId: id, ctc: ctc, from: fromMonth });
     MONTHS.forEach(function (m) {
       if (mindex(m) < mindex(fromMonth) || mindex(m) < mindex(e.join)) return;
       sync('setEmpCost', { month: m, employeeId: id, monthly: ctc / 12 });

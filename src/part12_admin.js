@@ -166,12 +166,19 @@
     });
     var disc = field({ label: 'Delivery discipline', type: 'select', value: e0 ? e0.disc : 'eng', options: DISC });
     var join = field({ label: 'Joining month', type: 'select', value: e0 ? e0.join : m, options: monthOpts(), hint: 'No cost is carried before this month.' });
+    /* Amending pay is behind the Settings safeguard; setting it on a new person
+       is not, because you cannot add someone without it. This is a catch against
+       a slip, not a permission - the server still requires owner or finance. */
+    var ctcLocked = e0 && !(root.SET && root.SET.get().ctcEditable);
     var ctc = field({
       label: 'Annual CTC', required: true, type: 'number', step: 600, min: 0, prefix: curSymbol(),
       value: cur ? cur.ctc : (e0 ? e0.baseCtc : 48000),
-      hint: e0 ? 'Applies from <strong>' + esc(C.mlabel(m)) + '</strong> forward. Earlier months keep the cost they closed with.'
+      hint: ctcLocked
+        ? 'Locked. Turn on <strong>Settings → Safeguards → Amending employee CTC</strong> to change it.'
+        : e0 ? 'Applies from <strong>' + esc(C.mlabel(m)) + '</strong> forward. Earlier months keep the cost they closed with.'
         : 'Divided by twelve to give the monthly cost.'
     });
+    if (ctcLocked) { ctc.input.disabled = true; ctc.classList.add('locked'); }
     var out = U.readout('<b>' + money(0) + '</b> monthly cost');
     function calc() { out.innerHTML = '<b>' + money((+ctc.value() || 0) / 12) + '</b> monthly cost, charged from ' + esc(C.mlabel(join.value())); }
     ctc.input.addEventListener('input', calc);
@@ -254,7 +261,9 @@
     Edit: { icon: 'edit', tip: 'Edit details' },
     Delete: { icon: 'trash', tip: 'Delete from every month', danger: true },
     Archive: { icon: 'archive', tip: 'Close the project, keep its history' },
-    Allocate: { icon: 'sliders', tip: 'Open the allocation workbench' }
+    Allocate: { icon: 'sliders', tip: 'Open the allocation workbench' },
+    'Change password': { icon: 'key', tip: 'Change your own password' },
+    'Reset password': { icon: 'key', tip: 'Set a new password for this account' }
   };
   function actionCell(list) {
     return '<div class="row-acts">' + list.map(function (label) {
@@ -532,50 +541,53 @@
   }
   /* ---------- accounts ------------------------------------------------------ */
   /* Sign-ins, not the payroll register - users and employees are separate
-     things and nothing links them. Resetting is owner only; the server checks
-     that as well, because a hidden button is not a permission. */
+     things and nothing links them. Built with U.table like every other tab on
+     this screen, so it sorts, exports and insets the same way. Resetting is
+     owner only, and the server checks that too. */
   function accountsPane() {
     var wrap = el('<div class="stack"></div>');
     var me = root.AUTH && root.AUTH.user ? root.AUTH.user() : null;
     var isOwner = root.AUTH && root.AUTH.role() === 'owner';
 
-    if (!C.USERS.length) {
-      wrap.appendChild(U.panel('Accounts', null,
-        el('<div class="empty">No accounts loaded yet.</div>'), true));
-      return wrap;
-    }
+    var rows = C.USERS.map(function (u) {
+      return {
+        id: u.email, name: u.name || u.email, email: u.email,
+        role: u.role, mine: !!(me && u.email === me.email), active: u.active !== false
+      };
+    });
 
-    var list = el('<div class="acct-list"></div>');
-    C.USERS.forEach(function (u) {
-      var mine = me && u.email === me.email;
-      var r = el('<div class="acct-row"></div>');
-      r.appendChild(el('<div class="who">' +
-        '<span class="nm">' + esc(u.name || u.email) + (mine ? ' <span class="you">you</span>' : '') + '</span>' +
-        '<span class="em">' + esc(u.email) + '</span></div>'));
-      r.appendChild(el('<span class="tag rl">' + esc(u.role) + '</span>'));
-
-      var act = el('<div class="act"></div>');
-      if (mine) {
-        act.appendChild(H.btn('Change password', '', function () { root.App.dialogs.password(); }));
-      } else if (isOwner) {
-        act.appendChild(H.btn('Reset password', '', function () {
-          root.App.dialogs.resetPassword(u.email);
-        }));
-      } else {
-        act.appendChild(el('<span class="muted" style="font-size:12px">Owner only</span>'));
+    var t = U.table([
+      { key: 'name', label: 'Person', cell: function (x) {
+          return '<strong>' + esc(x.name) + '</strong>' +
+                 (x.mine ? ' <span class="tag">you</span>' : '') +
+                 (x.active ? '' : ' <span class="tag">inactive</span>'); } },
+      { key: 'email', label: 'Email', cell: function (x) {
+          return '<span class="muted">' + esc(x.email) + '</span>'; } },
+      { key: 'role', label: 'Role', cell: function (x) {
+          return '<span class="tag">' + esc(x.role) + '</span>'; } },
+      { key: 'act', label: '', sortable: false, num: true, hideable: false, noExport: true,
+        cell: function (x) {
+          if (x.mine) return actionCell(['Change password']);
+          return isOwner ? actionCell(['Reset password']) : '';
+        } }
+    ], rows, {
+      title: 'Accounts', subtitle: 'Code to Click', exportName: 'Accounts',
+      sortKey: 'name', sortDir: 1, id: 'admin-accounts',
+      empty: 'No accounts have loaded yet.',
+      onAction: function (x, label) {
+        if (label === 'Change password') root.App.dialogs.password();
+        else root.App.dialogs.resetPassword(x.email);
       }
-      r.appendChild(act);
-      list.appendChild(r);
     });
 
     wrap.appendChild(U.panel('Accounts',
       C.USERS.length + ' sign-in' + (C.USERS.length === 1 ? '' : 's') + ' in this organization',
-      list, true));
+      t, true));
 
     if (isOwner) {
-      wrap.appendChild(el('<div class="callout">Resetting someone’s password ends every session ' +
-        'they have open. Your own password is changed from the row above, which keeps you signed in ' +
-        'and asks for the current one.</div>'));
+      wrap.appendChild(el('<div class="callout">Resetting a password ends every session that ' +
+        'person has open. Your own is changed from your row, which keeps you signed in and asks ' +
+        'for the current one.</div>'));
     }
     return wrap;
   }

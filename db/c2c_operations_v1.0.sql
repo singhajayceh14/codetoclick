@@ -483,3 +483,40 @@ begin
   -- Without this the lockout counter can keep them out with their new password.
   delete from login_attempts where email = p_email;
 end $$;
+
+-- ---------------------------------------------------------------------------
+-- Amend someone's pay
+-- ---------------------------------------------------------------------------
+--
+-- op_add_employee writes the first employee_compensation row and nothing ever
+-- wrote a second one, so a raise could not be recorded. The app was already
+-- restating employee_period_costs month by month through op_set_emp_cost, which
+-- meant the monthly figures moved while the salary register did not - and the
+-- headline CTC reverted to the joining figure on the next page load.
+--
+-- The register is one row per change, applying from its month forward. Earlier
+-- months keep whatever they closed with, which is rule 2 and the reason this
+-- amends rather than overwrites.
+create or replace function op_set_employee_ctc(p_org uuid, p_code text,
+                                               p_ctc money_amount, p_from period_month)
+returns void language plpgsql
+set search_path = c2c, public
+as $$
+declare eid uuid; joined period_month;
+begin
+  if p_ctc is null or p_ctc < 0 then
+    raise exception 'A CTC cannot be negative.';
+  end if;
+
+  eid := code_id('employees', p_org, p_code);
+  select joined_on into joined from employees where id = eid;
+  if p_from < joined then
+    raise exception 'That is before % joined. A raise cannot start earlier than the joining month.',
+      to_char(joined, 'Mon YYYY');
+  end if;
+
+  insert into employee_compensation (org_id, employee_id, effective_from, annual_ctc, reason)
+  values (p_org, eid, p_from, p_ctc, 'amendment')
+  on conflict (employee_id, effective_from)
+    do update set annual_ctc = excluded.annual_ctc, reason = 'amendment';
+end $$;

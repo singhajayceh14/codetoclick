@@ -328,6 +328,9 @@ a{color:var(--link);text-decoration:none}
 /* --- period bar --------------------------------------------------------- */
 .periodbar{display:flex;align-items:center;gap:14px;padding:16px 24px 0;flex-wrap:wrap;
   max-width:1560px;margin:0 auto;width:100%}
+/* Hidden outright on screens that are a single month by definition. Needs to
+   sit beside the base rule, not inside a breakpoint, or display:flex wins. */
+.periodbar[hidden]{display:none}
 .periods{display:inline-flex;padding:3px;gap:2px;background:var(--layer-2);
   border-radius:var(--r-md);flex:none}
 .periods button{background:none;border:0;padding:6px 13px;font-size:12.5px;font-weight:500;
@@ -728,6 +731,10 @@ table.grid tr.sub-row td:first-child{padding-left:34px;color:var(--text-2)}
 .fld.invalid .fl-ctl{border-color:var(--err);background:var(--err-bg)}
 .fld.invalid .fl-hint{color:var(--err);font-weight:500;display:flex;gap:6px;align-items:flex-start}
 .fld.ok .fl-ctl{border-color:var(--ok)}
+/* A field held shut by a safeguard rather than by a permission. Dashed so it
+   reads as deliberately closed, not as broken or disabled by a bug. */
+.fld.locked .fl-ctl{background:var(--layer-2);border-style:dashed}
+.fld.locked input{color:var(--text-3);cursor:not-allowed}
 .form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(210px,100%),1fr));gap:16px}
 .form-sec{display:flex;align-items:center;gap:10px;margin:6px 0 -2px}
 .form-sec .lb{font-size:12.5px;font-weight:600;letter-spacing:-.01em;color:var(--text)}
@@ -1522,24 +1529,6 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
    shared a fixed control column with the role chip. */
 .set-ident{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
 .set-ident .em{font-size:13px;color:var(--text-2);word-break:break-all}
-
-/* Accounts in Administration. A row is a person, their role, and the single
-   action available on them. */
-.acct-list{display:flex;flex-direction:column}
-.acct-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:14px;align-items:center;
-  padding:13px 2px;border-bottom:1px solid var(--border)}
-.acct-row:last-child{border-bottom:0}
-.acct-row .who{display:flex;flex-direction:column;gap:3px;min-width:0}
-.acct-row .nm{font-size:13.5px;font-weight:600;color:var(--text)}
-.acct-row .em{font-size:12px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.acct-row .you{font-size:11px;font-weight:500;color:var(--text-3);border:1px solid var(--border);
-  border-radius:var(--r-pill);padding:1px 7px;margin-left:5px}
-.acct-row .rl{text-transform:capitalize;justify-self:end}
-.acct-row .act{display:flex;justify-content:flex-end}
-@media (max-width:640px){
-  .acct-row{grid-template-columns:minmax(0,1fr) auto;row-gap:11px}
-  .acct-row .act{grid-column:1/-1;justify-content:flex-start}
-}
 
 .si-panel{display:flex;align-items:center;justify-content:center;padding:clamp(24px,4vw,48px)}
 .si-card{width:100%;max-width:392px}
