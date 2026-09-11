@@ -221,17 +221,47 @@ create or replace function op_set_allocation(p_org uuid, p_period period_month,
 returns void language plpgsql
 set search_path = c2c, public
 as $$
-declare eid uuid; k text; v numeric;
+declare eid uuid; k text; v numeric; pid uuid;
 begin
   perform ensure_period(p_org, p_period);
   eid := code_id('employees', p_org, p_employee);
-  delete from allocations where org_id = p_org and period = p_period and employee_id = eid;
-  for k, v in select key, value::text::numeric from jsonb_each(coalesce(p_map, '{}'::jsonb)) loop
-    if v > 0 then
-      insert into allocations (org_id, period, employee_id, project_id, allocation_pct)
-      values (p_org, p_period, eid,
-              case when k = 'INTERNAL' then null else code_id('projects', p_org, k) end, v);
-    end if;
+
+  -- Only touch what actually differs. This used to delete the whole month and
+  -- reinsert it, which was fine until the audit triggers arrived: moving one
+  -- project from 50% to 70% then wrote a delete and an insert for every line
+  -- the person had, and the trail became unreadable.
+  delete from allocations a
+   where a.org_id = p_org and a.period = p_period and a.employee_id = eid
+     and not exists (
+       select 1 from jsonb_each(coalesce(p_map, '{}'::jsonb)) m
+        where (m.value #>> '{}')::numeric > 0
+          and (case when m.key = 'INTERNAL' then null
+                    else code_id('projects', p_org, m.key) end) is not distinct from a.project_id);
+
+  -- Decreases before increases. The 100% cap is a per-row trigger, so the
+  -- running total has to stay at or below the finished total the whole way -
+  -- swapping 50/50 for 70/30 in the other order trips it at 120%.
+  for k, v in select m.key, (m.value #>> '{}')::numeric
+                from jsonb_each(coalesce(p_map, '{}'::jsonb)) m
+               where (m.value #>> '{}')::numeric > 0 loop
+    pid := case when k = 'INTERNAL' then null else code_id('projects', p_org, k) end;
+    update allocations set allocation_pct = v, updated_at = now()
+     where org_id = p_org and period = p_period and employee_id = eid
+       and project_id is not distinct from pid and allocation_pct > v;
+  end loop;
+
+  for k, v in select m.key, (m.value #>> '{}')::numeric
+                from jsonb_each(coalesce(p_map, '{}'::jsonb)) m
+               where (m.value #>> '{}')::numeric > 0 loop
+    pid := case when k = 'INTERNAL' then null else code_id('projects', p_org, k) end;
+    update allocations set allocation_pct = v, updated_at = now()
+     where org_id = p_org and period = p_period and employee_id = eid
+       and project_id is not distinct from pid and allocation_pct <> v;
+    insert into allocations (org_id, period, employee_id, project_id, allocation_pct)
+    select p_org, p_period, eid, pid, v
+     where not exists (select 1 from allocations
+                        where org_id = p_org and period = p_period and employee_id = eid
+                          and project_id is not distinct from pid);
   end loop;
 end $$;
 

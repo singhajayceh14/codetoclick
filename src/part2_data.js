@@ -868,6 +868,20 @@
     snapshot(month).other.push({ projectId: projectId || null, category: category, amount: Math.round(amount) });
     invalidate(month);
   }
+  /* Apply to the working copy only. The allocation editor uses this while
+     someone is dragging sliders, so the figures on screen move without a write
+     - and without an audit row - behind every adjustment. setAllocation is the
+     one that commits. */
+  function setAllocationLocal(month, empId, map) {
+    var total = Object.keys(map).reduce(function (t, k) { return t + (map[k] || 0); }, 0);
+    if (total > 100) return { ok: false, error: 'Allocation totals ' + total + '%. Reduce it to 100% or less before saving.' };
+    var clean = {};
+    Object.keys(map).forEach(function (k) { if (map[k] > 0) clean[k] = map[k]; });
+    snapshot(month).alloc[empId] = clean;
+    invalidate(month);
+    return { ok: true, total: total };
+  }
+
   function setAllocation(month, empId, map) {
     sync('setAllocation', { month: month, employeeId: empId, map: map });
     var total = Object.keys(map).reduce(function (t, k) { return t + (map[k] || 0); }, 0);
@@ -1179,7 +1193,8 @@
     isActiveEmp: isActiveEmp, isActiveProj: isActiveProj, ctcAt: ctcAt,
     snapshot: snapshot, rollup: rollup, aggregate: aggregate, aggregateBy: aggregateBy,
     monthsFor: monthsFor, invalidate: invalidate,
-    setRevenue: setRevenue, addCost: addCost, setAllocation: setAllocation, addEmployee: addEmployee,
+    setRevenue: setRevenue, addCost: addCost, setAllocation: setAllocation,
+    setAllocationLocal: setAllocationLocal, addEmployee: addEmployee,
     getAllocations: getAllocations, setAllocations: setAllocations, copyAllocations: copyAllocations,
     addClient: addClient, updateClient: updateClient, deleteClient: deleteClient, clientProjects: clientProjects,
     addProject: addProject, updateProject: updateProject, archiveProject: archiveProject, deleteProject: deleteProject,

@@ -1556,6 +1556,13 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
 .set-ident{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
 .set-ident .em{font-size:13px;color:var(--text-2);word-break:break-all}
 
+/* Unsaved allocation edits. Sticky to the foot of the editor so Save is in
+   reach however far down the project list runs. */
+.alloc-save{position:sticky;bottom:0;display:flex;align-items:center;gap:10px;
+  padding:11px 14px;margin-top:4px;background:var(--warn-bg);
+  border-top:1px solid var(--warn-line);border-radius:0 0 var(--r-lg) var(--r-lg)}
+.alloc-save .st{flex:1;min-width:0;font-size:12.5px;font-weight:550;color:var(--warn)}
+
 .si-panel{display:flex;align-items:center;justify-content:center;padding:clamp(24px,4vw,48px)}
 .si-card{width:100%;max-width:392px}
 .si-card h1{font-size:30px;font-weight:640;letter-spacing:-.032em;line-height:1.14;margin:0 0 8px}
@@ -2719,6 +2726,20 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
     snapshot(month).other.push({ projectId: projectId || null, category: category, amount: Math.round(amount) });
     invalidate(month);
   }
+  /* Apply to the working copy only. The allocation editor uses this while
+     someone is dragging sliders, so the figures on screen move without a write
+     - and without an audit row - behind every adjustment. setAllocation is the
+     one that commits. */
+  function setAllocationLocal(month, empId, map) {
+    var total = Object.keys(map).reduce(function (t, k) { return t + (map[k] || 0); }, 0);
+    if (total > 100) return { ok: false, error: 'Allocation totals ' + total + '%. Reduce it to 100% or less before saving.' };
+    var clean = {};
+    Object.keys(map).forEach(function (k) { if (map[k] > 0) clean[k] = map[k]; });
+    snapshot(month).alloc[empId] = clean;
+    invalidate(month);
+    return { ok: true, total: total };
+  }
+
   function setAllocation(month, empId, map) {
     sync('setAllocation', { month: month, employeeId: empId, map: map });
     var total = Object.keys(map).reduce(function (t, k) { return t + (map[k] || 0); }, 0);
@@ -3030,7 +3051,8 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
     isActiveEmp: isActiveEmp, isActiveProj: isActiveProj, ctcAt: ctcAt,
     snapshot: snapshot, rollup: rollup, aggregate: aggregate, aggregateBy: aggregateBy,
     monthsFor: monthsFor, invalidate: invalidate,
-    setRevenue: setRevenue, addCost: addCost, setAllocation: setAllocation, addEmployee: addEmployee,
+    setRevenue: setRevenue, addCost: addCost, setAllocation: setAllocation,
+    setAllocationLocal: setAllocationLocal, addEmployee: addEmployee,
     getAllocations: getAllocations, setAllocations: setAllocations, copyAllocations: copyAllocations,
     addClient: addClient, updateClient: updateClient, deleteClient: deleteClient, clientProjects: clientProjects,
     addProject: addProject, updateProject: updateProject, archiveProject: archiveProject, deleteProject: deleteProject,
@@ -6765,6 +6787,38 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
     root.App.render();
     window.scrollTo(0, y);
   }
+  /* Edits to one person's month are held here until Save. Sliders write to the
+     working copy so the donut and the figures move as you drag, but nothing
+     reaches the database - and nothing reaches the audit trail - until the
+     change is a decision rather than a drag. */
+  var pending = null;      /* {month, empId, name, baseline} */
+
+  function beginEdit(month, empId, name) {
+    if (pending && (pending.month !== month || pending.empId !== empId)) discardEdit(true);
+    if (!pending) pending = { month: month, empId: empId, name: name, baseline: mapOf(month, empId) };
+  }
+  function dirty(month, empId) {
+    return !!(pending && pending.month === month && pending.empId === empId);
+  }
+  function discardEdit(quiet) {
+    if (!pending) return;
+    C.setAllocationLocal(pending.month, pending.empId, pending.baseline);
+    if (!quiet) U.toast('Discarded unsaved changes to ' + pending.name, { kind: 'info' });
+    else U.toast('Unsaved changes to ' + pending.name + ' were discarded', { kind: 'warn' });
+    pending = null;
+  }
+  function saveEdit() {
+    if (!pending) return;
+    var map = mapOf(pending.month, pending.empId);
+    pushUndo(pending.month, 'allocation for ' + pending.name);
+    var out = C.setAllocation(pending.month, pending.empId, map);
+    if (out && out.ok === false) { U.toast(out.error, { kind: 'error' }); return; }
+    U.toast('Saved ' + pending.name + "'s allocation", { kind: 'success',
+      detail: C.mlabel(pending.month) + ' · ' + totalOf(map) + '% allocated' });
+    pending = null;
+    refresh();
+  }
+
   function pushUndo(month, label) {
     undoStack.push({ month: month, alloc: C.getAllocations(month), label: label });
     if (undoStack.length > 40) undoStack.shift();
@@ -6883,10 +6937,14 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
     var meta = C.byId(C.EMPLOYEES, emp.id) || {};
     var panel = el('<section class="p360" aria-label="' + esc(emp.name) + '"></section>');
 
-    function set(key, val, label) {
+    /* Buffered: the working copy moves so the screen responds, the database
+       does not until Save. */
+    function set(key, val) {
+      beginEdit(month, emp.id, emp.name);
       var m = mapOf(month, emp.id);
       if (val <= 0) delete m[key]; else m[key] = val;
-      write(month, emp.id, m, label);
+      var out = C.setAllocationLocal(month, emp.id, m);
+      if (out && out.ok === false) { U.toast(out.error, { kind: 'error' }); return; }
       refresh();
     }
 
@@ -6964,6 +7022,19 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
       set(sel.value, Math.min(step() * 2, free), 'adding ' + (sel.value === 'INTERNAL' ? 'internal' : H.projName(sel.value)) + ' for ' + emp.name);
     });
     ed.appendChild(add);
+
+    /* Save / Cancel. Only there once something has actually been moved, so the
+       panel is not carrying two dead buttons the rest of the time. */
+    if (dirty(month, emp.id)) {
+      var bar = el('<div class="alloc-save"><span class="st">Unsaved changes — ' +
+        totalOf(map) + '% allocated</span></div>');
+      var cancel = el('<button class="btn btn-sm" type="button">Cancel</button>');
+      cancel.addEventListener('click', function () { discardEdit(); refresh(); });
+      var save = el('<button class="btn btn-sm btn-primary" type="button">Save allocation</button>');
+      save.addEventListener('click', saveEdit);
+      bar.appendChild(cancel); bar.appendChild(save);
+      ed.appendChild(bar);
+    }
 
     /* quick actions */
     var q = el('<div class="alloc-quick"></div>');

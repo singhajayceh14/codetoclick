@@ -1551,6 +1551,13 @@ table.rg .ok{color:var(--ok)} table.rg .bad{color:var(--err)} table.rg .muted{co
 .set-ident{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
 .set-ident .em{font-size:13px;color:var(--text-2);word-break:break-all}
 
+/* Unsaved allocation edits. Sticky to the foot of the editor so Save is in
+   reach however far down the project list runs. */
+.alloc-save{position:sticky;bottom:0;display:flex;align-items:center;gap:10px;
+  padding:11px 14px;margin-top:4px;background:var(--warn-bg);
+  border-top:1px solid var(--warn-line);border-radius:0 0 var(--r-lg) var(--r-lg)}
+.alloc-save .st{flex:1;min-width:0;font-size:12.5px;font-weight:550;color:var(--warn)}
+
 .si-panel{display:flex;align-items:center;justify-content:center;padding:clamp(24px,4vw,48px)}
 .si-card{width:100%;max-width:392px}
 .si-card h1{font-size:30px;font-weight:640;letter-spacing:-.032em;line-height:1.14;margin:0 0 8px}

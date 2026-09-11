@@ -30,6 +30,38 @@
     root.App.render();
     window.scrollTo(0, y);
   }
+  /* Edits to one person's month are held here until Save. Sliders write to the
+     working copy so the donut and the figures move as you drag, but nothing
+     reaches the database - and nothing reaches the audit trail - until the
+     change is a decision rather than a drag. */
+  var pending = null;      /* {month, empId, name, baseline} */
+
+  function beginEdit(month, empId, name) {
+    if (pending && (pending.month !== month || pending.empId !== empId)) discardEdit(true);
+    if (!pending) pending = { month: month, empId: empId, name: name, baseline: mapOf(month, empId) };
+  }
+  function dirty(month, empId) {
+    return !!(pending && pending.month === month && pending.empId === empId);
+  }
+  function discardEdit(quiet) {
+    if (!pending) return;
+    C.setAllocationLocal(pending.month, pending.empId, pending.baseline);
+    if (!quiet) U.toast('Discarded unsaved changes to ' + pending.name, { kind: 'info' });
+    else U.toast('Unsaved changes to ' + pending.name + ' were discarded', { kind: 'warn' });
+    pending = null;
+  }
+  function saveEdit() {
+    if (!pending) return;
+    var map = mapOf(pending.month, pending.empId);
+    pushUndo(pending.month, 'allocation for ' + pending.name);
+    var out = C.setAllocation(pending.month, pending.empId, map);
+    if (out && out.ok === false) { U.toast(out.error, { kind: 'error' }); return; }
+    U.toast('Saved ' + pending.name + "'s allocation", { kind: 'success',
+      detail: C.mlabel(pending.month) + ' · ' + totalOf(map) + '% allocated' });
+    pending = null;
+    refresh();
+  }
+
   function pushUndo(month, label) {
     undoStack.push({ month: month, alloc: C.getAllocations(month), label: label });
     if (undoStack.length > 40) undoStack.shift();
@@ -148,10 +180,14 @@
     var meta = C.byId(C.EMPLOYEES, emp.id) || {};
     var panel = el('<section class="p360" aria-label="' + esc(emp.name) + '"></section>');
 
-    function set(key, val, label) {
+    /* Buffered: the working copy moves so the screen responds, the database
+       does not until Save. */
+    function set(key, val) {
+      beginEdit(month, emp.id, emp.name);
       var m = mapOf(month, emp.id);
       if (val <= 0) delete m[key]; else m[key] = val;
-      write(month, emp.id, m, label);
+      var out = C.setAllocationLocal(month, emp.id, m);
+      if (out && out.ok === false) { U.toast(out.error, { kind: 'error' }); return; }
       refresh();
     }
 
@@ -229,6 +265,19 @@
       set(sel.value, Math.min(step() * 2, free), 'adding ' + (sel.value === 'INTERNAL' ? 'internal' : H.projName(sel.value)) + ' for ' + emp.name);
     });
     ed.appendChild(add);
+
+    /* Save / Cancel. Only there once something has actually been moved, so the
+       panel is not carrying two dead buttons the rest of the time. */
+    if (dirty(month, emp.id)) {
+      var bar = el('<div class="alloc-save"><span class="st">Unsaved changes — ' +
+        totalOf(map) + '% allocated</span></div>');
+      var cancel = el('<button class="btn btn-sm" type="button">Cancel</button>');
+      cancel.addEventListener('click', function () { discardEdit(); refresh(); });
+      var save = el('<button class="btn btn-sm btn-primary" type="button">Save allocation</button>');
+      save.addEventListener('click', saveEdit);
+      bar.appendChild(cancel); bar.appendChild(save);
+      ed.appendChild(bar);
+    }
 
     /* quick actions */
     var q = el('<div class="alloc-quick"></div>');
