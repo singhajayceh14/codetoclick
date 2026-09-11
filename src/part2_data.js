@@ -589,6 +589,25 @@
     return sync('adminSetPassword', { email: email, next: next }, true);
   }
 
+  /* The audit trail. A read, not a mutation, and deliberately not part of the
+     state load: it grows without bound and only one screen wants it. */
+  function auditLog(opts) {
+    opts = opts || {};
+    var q = [];
+    if (opts.month) q.push('month=' + encodeURIComponent(opts.month));
+    if (opts.before) q.push('before=' + encodeURIComponent(opts.before));
+    if (opts.limit) q.push('limit=' + (opts.limit | 0));
+    return fetch('/api/audit' + (q.length ? '?' + q.join('&') : ''), { credentials: 'same-origin' })
+      .then(function (r) {
+        return r.json().then(function (d) {
+          return { ok: r.ok, rows: d.rows || [], message: d.message };
+        });
+      })
+      .catch(function () {
+        return { ok: false, rows: [], message: 'Could not reach the server.' };
+      });
+  }
+
   function persist() { }          /* the server is the record now */
   function persistedAt() { return null; }
   function forgetPersisted() { }
@@ -1167,6 +1186,7 @@
     updateEmployee: updateEmployee, setEmployeeCtc: setEmployeeCtc, deleteEmployee: deleteEmployee,
     exportState: exportState, importState: importState, byId: byId,
     USERS: USERS, setOwnPassword: setOwnPassword, adminSetPassword: adminSetPassword,
+    auditLog: auditLog,
     loadFromServer: loadFromServer, syncState: SYNC
   };
 })(typeof window !== 'undefined' ? window : globalThis);

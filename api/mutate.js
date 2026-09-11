@@ -32,7 +32,17 @@ export default async function handler(req, res) {
   }
 
   try {
-    await run(db(), me.org_id, args || {}, me);
+    /* The audit triggers read whoever is acting from a transaction-local
+       setting, so it has to travel in the same transaction as the write - not
+       as a second call, which a pooled HTTP connection would not carry over.
+       Nothing outside a request sets it, so a change made by hand in the SQL
+       editor records a null actor rather than the wrong one. */
+    const sql = db();
+    const write = run(sql, me.org_id, args || {}, me);
+    await sql.transaction([
+      sql`select set_config('c2c.actor', ${me.user_id}, true)`,
+      write
+    ]);
     res.status(200).json({ ok: true });
   } catch (e) {
     console.error('mutate', op, 'failed:', e.message);

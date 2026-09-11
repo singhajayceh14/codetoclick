@@ -27,8 +27,23 @@
     /* Owner only. The server enforces this too - hiding a tab is not a
        permission, and api/mutate.js assumes it is called directly. */
     { v: 'accounts', l: 'Accounts', i: 'employees', n: null,
-      when: function () { return root.AUTH && root.AUTH.role() === 'owner'; } }
+      when: function () { return root.AUTH && root.AUTH.role() === 'owner'; } },
+    /* Who changed a salary is not something a read-only account should read.
+       The endpoint enforces the same pair; the tab only hides it. */
+    { v: 'activity', l: 'Activity', i: 'reports', n: null,
+      when: function () {
+        var r = root.AUTH && root.AUTH.role();
+        return r === 'owner' || r === 'finance';
+      } }
   ];
+
+  /* What each audited table is called in the product's own words. */
+  var AUDIT_WHAT = {
+    allocations: 'Allocation', project_revenue: 'Revenue',
+    employee_period_costs: 'Payroll', employee_compensation: 'Salary',
+    other_costs: 'Cost', periods: 'Month status', clients: 'Client',
+    projects: 'Project', employees: 'Person', software_licences: 'Licence'
+  };
   function visibleTabs() {
     return TABS.filter(function (t) { return !t.when || t.when(); });
   }
@@ -314,6 +329,7 @@
     else if (a.tab === 'employees') f.appendChild(peoplePane(m));
     else if (a.tab === 'licences') f.appendChild(root.App.licencePane ? root.App.licencePane(m) : el('<div class="empty">Licences are unavailable.</div>'));
     else if (a.tab === 'accounts') f.appendChild(accountsPane());
+    else if (a.tab === 'activity') f.appendChild(activityPane());
     else f.appendChild(backupPane());
     return f;
   };
@@ -539,6 +555,61 @@
     }, 'trash');
     root.App.openDialog('Clear all data', body, [go], 'Start from an empty company');
   }
+  /* ---------- activity ------------------------------------------------------
+     The audit trail. Loaded on demand rather than with the rest of the state,
+     so the panel renders immediately and fills in. */
+  function activityPane() {
+    var wrap = el('<div class="stack"></div>');
+    var body = el('<div class="empty">Loading the activity log…</div>');
+    wrap.appendChild(U.panel('Activity', 'Every change to a figure or a register, newest first',
+      body, true));
+
+    C.auditLog({ limit: 100 }).then(function (out) {
+      var host = body.parentNode;
+      if (!host) return;
+      var next;
+
+      if (!out.ok) {
+        next = el('<div class="empty">' + esc(out.message || 'Could not load the activity log.') + '</div>');
+      } else if (!out.rows.length) {
+        next = el(U.emptyState('Nothing recorded yet',
+          'Changes are logged from the moment the audit triggers are installed. ' +
+          'Edit an allocation or a revenue figure and it will appear here.', '', 'reports'));
+      } else {
+        next = U.table([
+          { key: 'at', label: 'When', cell: function (x) { return '<span class="mono">' + esc(x.at) + '</span>'; } },
+          { key: 'actor', label: 'Who', cell: function (x) {
+              return esc(x.actor) + (x.actorEmail ? '<div class="muted" style="font-size:11px">' +
+                     esc(x.actorEmail) + '</div>' : ''); } },
+          { key: 'table', label: 'What', cell: function (x) {
+              return '<span class="tag">' + esc(AUDIT_WHAT[x.table] || x.table) + '</span>'; } },
+          { key: 'subject', label: 'Which', cell: function (x) {
+              var bits = [];
+              if (x.employee) bits.push(esc(x.employee));
+              if (x.project) bits.push(esc(x.project));
+              return bits.length ? bits.join(' &middot; ') : '<span class="muted">—</span>'; },
+            sortVal: function (x) { return (x.employee || '') + (x.project || ''); } },
+          { key: 'month', label: 'Month', cell: function (x) {
+              return x.month ? esc(C.mshort(x.month)) : '<span class="muted">—</span>'; } },
+          { key: 'action', label: 'Action', cell: function (x) { return esc(x.action); } },
+          { key: 'change', label: 'Change', sortable: false, cell: function (x) {
+              return x.change ? '<span class="mono">' + esc(x.change) + '</span>'
+                              : '<span class="muted">—</span>'; } }
+        ], out.rows, {
+          title: 'Activity', subtitle: 'Code to Click', exportName: 'Activity log',
+          sortKey: 'at', sortDir: -1, id: 'admin-activity',
+          empty: 'Nothing recorded yet.'
+        });
+      }
+      host.replaceChild(next, body);
+      body = next;
+    });
+
+    wrap.appendChild(el('<div class="callout">A change made by hand in the SQL editor is recorded ' +
+      'too, but with no one attached to it — it shows as <strong>outside the app</strong>.</div>'));
+    return wrap;
+  }
+
   /* ---------- accounts ------------------------------------------------------ */
   /* Sign-ins, not the payroll register - users and employees are separate
      things and nothing links them. Built with U.table like every other tab on
